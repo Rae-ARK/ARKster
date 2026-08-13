@@ -1,0 +1,17 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.arkster.app">
+
+    <application
+        android:allowBackup="true"
+        android:label="ARKster"
+        android:theme="@style/Theme.Material3.DayNight">
+        <activity android:name="com.arkster.app.MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>
