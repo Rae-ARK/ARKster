@@ -18,23 +18,30 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
+import com.arkster.app.ui.ChapterEditorScreen
 import com.arkster.app.ui.LibraryScreen
 import com.arkster.app.ui.NovelDetailScreen
 import com.arkster.app.ui.ReaderScreen
+import com.arkster.app.ui.SettingsScreen
 import com.arkster.app.data.AppDatabase
+import com.arkster.app.data.ArcEntity
+import com.arkster.app.data.ChapterOverrideEntity
+import com.arkster.app.data.ReadingProgressEntity
 import com.arkster.app.data.ScannerImpl
 import com.arkster.app.data.NovelEntity
 import com.arkster.app.data.ChapterEntity
 import com.arkster.app.data.PreferencesManager
+import com.arkster.app.data.Theme
 import com.arkster.app.data.TextChapterContentRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.UUID
 
 sealed class Screen {
     object Library : Screen()
     data class NovelDetail(val novel: NovelEntity) : Screen()
-    data class Reader(val chapter: ChapterEntity, val content: String) : Screen()
+    data class Reader(val novelId: String, val chapter: ChapterEntity, val content: String) : Screen()
     data class ChapterEditor(val novel: NovelEntity) : Screen()
     object Settings : Screen()
 }
@@ -42,8 +49,9 @@ sealed class Screen {
 class MainActivity : ComponentActivity() {
 
     private val novels = mutableStateListOf<NovelEntity>()
-    private val chapters = mutableStateListOf<ChapterEntity>()
+    private val chapters = mutableStateListOf<ChapterEntity>() // overrides already applied
     private val arcs = mutableStateListOf<ArcEntity>()
+    private val recentlyRead = mutableStateListOf<NovelEntity>()
     private val currentScreen = mutableStateOf<Screen>(Screen.Library)
     private val currentTheme = mutableStateOf(Theme.LIGHT)
     private lateinit var db: AppDatabase
@@ -74,15 +82,78 @@ class MainActivity : ComponentActivity() {
                 scanner.scanChaptersForNovel(novelFolder, novel.id, db)
             }
         }
-        // Refresh to load arcs and updated chapters
-        loadNovelDetails(novels.firstOrNull() ?: return)
+        refreshRecentlyRead()
     }
 
+    // Loads the raw scanned chapters for a novel and applies any saved chapter_overrides
+    // (title/position) on top, so every screen downstream sees the "effective" chapter
+    // list rather than raw scan data.
     private suspend fun loadNovelDetails(novel: NovelEntity) {
+        val raw = db.chapterDao().forNovel(novel.id)
+        val overridesByChapterId = db.chapterOverrideDao().forNovel(novel.id).associateBy { it.chapterId }
+        val rawIndexById = raw.withIndex().associate { (i, c) -> c.id to i }
+
+        val effective = raw
+            .map { chapter ->
+                val override = overridesByChapterId[chapter.id]
+                if (override?.titleOverride != null) chapter.copy(title = override.titleOverride) else chapter
+            }
+            .sortedBy { chapter -> overridesByChapterId[chapter.id]?.positionOverride ?: rawIndexById[chapter.id] ?: 0 }
+
         chapters.clear()
+        chapters.addAll(effective)
         arcs.clear()
-        chapters.addAll(db.chapterDao().forNovel(novel.id))
         arcs.addAll(db.arcDao().forNovel(novel.id))
+    }
+
+    // Diffs the editor's edited chapter list against the raw scanned chapters and
+    // persists per-chapter overrides only where something actually changed. If an edit
+    // matches the scanned default again, any stale override for that chapter is removed
+    // instead of being kept around with stale values.
+    private suspend fun saveChapterEdits(novel: NovelEntity, edited: List<ChapterEntity>) {
+        val raw = db.chapterDao().forNovel(novel.id) // natural scan order, no overrides
+        val rawById = raw.associateBy { it.id }
+        val rawIndexById = raw.withIndex().associate { (i, c) -> c.id to i }
+
+        edited.forEachIndexed { index, chapter ->
+            val original = rawById[chapter.id] ?: return@forEachIndexed
+            val titleOverride = if (chapter.title != original.title) chapter.title else null
+            val positionOverride = if (index != rawIndexById[chapter.id]) index else null
+
+            if (titleOverride != null || positionOverride != null) {
+                db.chapterOverrideDao().upsert(
+                    ChapterOverrideEntity(
+                        id = UUID.nameUUIDFromBytes("override:${chapter.id}".toByteArray()).toString(),
+                        chapterId = chapter.id,
+                        titleOverride = titleOverride,
+                        positionOverride = positionOverride
+                    )
+                )
+            } else {
+                db.chapterOverrideDao().delete(chapter.id)
+            }
+        }
+        loadNovelDetails(novel)
+    }
+
+    private suspend fun saveReadingProgress(novelId: String, chapterId: String, progress: Float) {
+        db.readingProgressDao().upsert(
+            ReadingProgressEntity(
+                novelId = novelId,
+                chapterId = chapterId,
+                position = progress,
+                positionType = "PERCENTAGE",
+                updatedAt = System.currentTimeMillis()
+            )
+        )
+        refreshRecentlyRead()
+    }
+
+    private suspend fun refreshRecentlyRead() {
+        val ids = db.readingProgressDao().recentNovelIds()
+        val byId = novels.associateBy { it.id }
+        recentlyRead.clear()
+        recentlyRead.addAll(ids.mapNotNull { byId[it] })
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -120,7 +191,7 @@ class MainActivity : ComponentActivity() {
                             }
                             LibraryScreen(
                                 novels = novels,
-                                refcentlyRead = novels.take(3),
+                                recentlyRead = recentlyRead,
                                 onNovelSelected = { novel ->
                                     lifecycleScope.launch {
                                         loadNovelDetails(novel)
@@ -141,7 +212,7 @@ class MainActivity : ComponentActivity() {
                                 onChapterSelected = { chapter ->
                                     lifecycleScope.launch {
                                         val chapterContent = contentRepo.getTextContent(chapter.sourcePath)
-                                        currentScreen.value = Screen.Reader(chapter, chapterContent.body)
+                                        currentScreen.value = Screen.Reader(novel.id, chapter, chapterContent.body)
                                     }
                                 },
                                 onResizePages = { pageSize ->
@@ -158,7 +229,12 @@ class MainActivity : ComponentActivity() {
                             ReaderScreen(
                                 chapter = reader.chapter,
                                 content = reader.content,
-                                onBack = { currentScreen.value = Screen.Library }
+                                onBack = { progress ->
+                                    lifecycleScope.launch {
+                                        saveReadingProgress(reader.novelId, reader.chapter.id, progress)
+                                        currentScreen.value = Screen.Library
+                                    }
+                                }
                             )
                         }
 
@@ -167,9 +243,7 @@ class MainActivity : ComponentActivity() {
                             ChapterEditorScreen(
                                 chapters = chapters,
                                 onSave = { updatedChapters ->
-                                    // Persist changes to DB would go here
-                                    chapters.clear()
-                                    chapters.addAll(updatedChapters)
+                                    saveChapterEdits(novel, updatedChapters)
                                 },
                                 onBack = { currentScreen.value = Screen.NovelDetail(novel) }
                             )
@@ -185,8 +259,7 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onRescan = {
                                     lifecycleScope.launch {
-                                        val uri = prefsManager.libraryUri.collect { it }
-                                        if (uri != null) {
+                                        savedUri.value?.let { uri ->
                                             novels.clear()
                                             startScan(Uri.parse(uri))
                                         }

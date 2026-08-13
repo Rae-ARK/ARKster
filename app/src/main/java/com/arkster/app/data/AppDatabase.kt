@@ -13,9 +13,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ArcEntity::class,
         ChapterEntity::class,
         ChapterOverrideEntity::class,
-        ScanFingerprintEntity::class
+        ScanFingerprintEntity::class,
+        ReadingProgressEntity::class
     ],
-    version = 2
+    version = 3
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun novelDao(): NovelDao
@@ -23,6 +24,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun chapterDao(): ChapterDao
     abstract fun chapterOverrideDao(): ChapterOverrideDao
     abstract fun scanFingerprintDao(): ScanFingerprintDao
+    abstract fun readingProgressDao(): ReadingProgressDao
 
     companion object {
         // Migration from v1 to v2: add new tables
@@ -73,10 +75,27 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // Migration from v2 to v3: add reading_progress table.
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("""
+                    CREATE TABLE IF NOT EXISTS reading_progress (
+                        novel_id TEXT PRIMARY KEY NOT NULL,
+                        chapter_id TEXT NOT NULL,
+                        position REAL NOT NULL,
+                        position_type TEXT NOT NULL DEFAULT 'PERCENTAGE',
+                        updated_at INTEGER NOT NULL,
+                        FOREIGN KEY(novel_id) REFERENCES novels(id) ON DELETE CASCADE,
+                        FOREIGN KEY(chapter_id) REFERENCES chapters(id) ON DELETE CASCADE
+                    )
+                """.trimIndent())
+            }
+        }
+
         fun create(context: Context): AppDatabase = Room.databaseBuilder(
             context.applicationContext,
             AppDatabase::class.java,
             "arkster.db"
-        ).addMigrations(MIGRATION_1_2).build()
+        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
     }
 }

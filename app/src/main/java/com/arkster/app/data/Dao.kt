@@ -27,6 +27,9 @@ interface ArcDao {
 
     @Query("DELETE FROM arcs WHERE novel_id = :novelId")
     suspend fun deleteForNovel(novelId: String)
+
+    @Query("DELETE FROM arcs WHERE id = :arcId")
+    suspend fun delete(arcId: String)
 }
 
 @Dao
@@ -42,6 +45,9 @@ interface ChapterDao {
 
     @Query("DELETE FROM chapters WHERE novel_id = :novelId")
     suspend fun deleteForNovel(novelId: String)
+
+    @Query("DELETE FROM chapters WHERE id = :chapterId")
+    suspend fun delete(chapterId: String)
 }
 
 @Dao
@@ -52,8 +58,30 @@ interface ChapterOverrideDao {
     @Query("SELECT * FROM chapter_overrides WHERE chapter_id = :chapterId")
     suspend fun forChapter(chapterId: String): ChapterOverrideEntity?
 
+    // Joins through chapters so we can fetch every override for a novel in one query,
+    // used to apply overrides on top of the scanned chapter list at read time.
+    @Query("""
+        SELECT chapter_overrides.* FROM chapter_overrides
+        INNER JOIN chapters ON chapter_overrides.chapter_id = chapters.id
+        WHERE chapters.novel_id = :novelId
+    """)
+    suspend fun forNovel(novelId: String): List<ChapterOverrideEntity>
+
     @Query("DELETE FROM chapter_overrides WHERE chapter_id = :chapterId")
     suspend fun delete(chapterId: String)
+}
+
+@Dao
+interface ReadingProgressDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(progress: ReadingProgressEntity)
+
+    @Query("SELECT * FROM reading_progress WHERE novel_id = :novelId")
+    suspend fun forNovel(novelId: String): ReadingProgressEntity?
+
+    // Backs the "Continue Reading" row: most recently read novels first.
+    @Query("SELECT novel_id FROM reading_progress ORDER BY updated_at DESC LIMIT :limit")
+    suspend fun recentNovelIds(limit: Int = 10): List<String>
 }
 
 @Dao

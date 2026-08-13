@@ -27,7 +27,7 @@ import com.arkster.app.data.NovelEntity
 @Composable
 fun LibraryScreen(
     novels: List<NovelEntity>,
-    refcentlyRead: List<NovelEntity> = emptyList(),
+    recentlyRead: List<NovelEntity> = emptyList(),
     onNovelSelected: (NovelEntity) -> Unit = {},
     onSettingsClick: () -> Unit = {}
 ) {
@@ -60,11 +60,11 @@ fun LibraryScreen(
 
         LazyColumn {
             // Continue Reading section
-            if (refcentlyRead.isNotEmpty()) {
+            if (recentlyRead.isNotEmpty()) {
                 item {
                     Text("Continue Reading", modifier = Modifier.padding(12.dp))
                     LazyRow(modifier = Modifier.padding(horizontal = 8.dp)) {
-                        items(refcentlyRead) { novel ->
+                        items(recentlyRead) { novel ->
                             Card(
                                 modifier = Modifier
                                     .clickable { onNovelSelected(novel) }

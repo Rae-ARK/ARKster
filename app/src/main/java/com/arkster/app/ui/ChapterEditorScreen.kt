@@ -22,9 +22,11 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.arkster.app.data.ChapterEntity
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -34,6 +36,13 @@ fun ChapterEditorScreen(
     onBack: () -> Unit
 ) {
     val editedChapters = remember { mutableStateOf(chapters) }
+    val coroutineScope = rememberCoroutineScope()
+
+    fun updateTitle(chapter: ChapterEntity, newTitle: String) {
+        editedChapters.value = editedChapters.value.map {
+            if (it.id == chapter.id) it.copy(title = newTitle) else it
+        }
+    }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         TopAppBar(
@@ -46,14 +55,12 @@ fun ChapterEditorScreen(
         )
 
         LazyColumn {
-            items(editedChapters.value) { chapter ->
-                val editTitle = remember { mutableStateOf(chapter.title) }
-
+            items(editedChapters.value, key = { it.id }) { chapter ->
                 Card(modifier = Modifier.padding(8.dp)) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         TextField(
-                            value = editTitle.value,
-                            onValueChange = { editTitle.value = it },
+                            value = chapter.title,
+                            onValueChange = { updateTitle(chapter, it) },
                             label = { Text("Title") },
                             modifier = Modifier.fillMaxWidth()
                         )
@@ -94,8 +101,10 @@ fun ChapterEditorScreen(
 
         Button(
             onClick = {
-                // TODO: save changes (would need coroutine support from Composable)
-                onBack()
+                coroutineScope.launch {
+                    onSave(editedChapters.value)
+                    onBack()
+                }
             },
             modifier = Modifier
                 .fillMaxWidth()

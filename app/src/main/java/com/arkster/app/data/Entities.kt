@@ -52,6 +52,21 @@ data class ChapterOverrideEntity(
     @ColumnInfo(name = "is_arc_start") val isArcStart: Boolean = false
 )
 
+// positionType interpretation for ReadingProgressEntity.position:
+// CHAR_OFFSET, HTML_LOCATION, EPUB_CFI, PAGE_INDEX, PERCENTAGE
+@Entity(tableName = "reading_progress",
+    foreignKeys = [
+        ForeignKey(entity = NovelEntity::class, parentColumns = ["id"], childColumns = ["novel_id"], onDelete = ForeignKey.CASCADE),
+        ForeignKey(entity = ChapterEntity::class, parentColumns = ["id"], childColumns = ["chapter_id"], onDelete = ForeignKey.CASCADE)
+    ])
+data class ReadingProgressEntity(
+    @PrimaryKey @ColumnInfo(name = "novel_id") val novelId: String, // one active progress row per novel
+    @ColumnInfo(name = "chapter_id") val chapterId: String,
+    @ColumnInfo val position: Float,
+    @ColumnInfo(name = "position_type") val positionType: String = "PERCENTAGE",
+    @ColumnInfo(name = "updated_at") val updatedAt: Long
+)
+
 @Entity(tableName = "scan_fingerprints",
     foreignKeys = [
         ForeignKey(entity = NovelEntity::class, parentColumns = ["id"], childColumns = ["novel_id"], onDelete = ForeignKey.CASCADE)

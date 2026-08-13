@@ -15,7 +15,9 @@ import java.util.UUID
 class ScannerImpl(private val context: Context) {
 
     companion object {
-        private const val CURRENT_SCAN_VERSION = 2
+        // Bumped because rescan logic changed from delete-all-reinsert to a diff-based
+        // upsert, which is required for chapter_overrides to survive a rescan.
+        private const val CURRENT_SCAN_VERSION = 3
 
         private val ARC_PATTERNS = listOf(
             Regex("^(?:Arc|Volume|Book|Part)\\s*(\\d+)?", RegexOption.IGNORE_CASE),
@@ -48,14 +50,19 @@ class ScannerImpl(private val context: Context) {
             return@withContext
         }
 
-        // Clear old data for this novel
-        db.chapterDao().deleteForNovel(novelId)
-        db.arcDao().deleteForNovel(novelId)
+        // Diff-based rescan: chapter IDs are deterministic (hashed from novelId + file URI),
+        // so upserting a chapter that already exists overwrites it in place without a
+        // delete step, which means chapter_overrides (FK CASCADE on chapter_id) is never
+        // touched for files that are still present. Overrides only disappear if their
+        // underlying chapter file has actually been removed - see removal pass below.
+        // This matches the design rule: manual overrides persist across rescans unless
+        // the source file itself is gone.
 
-        // Detect arcs (subfolders matching arc patterns)
-        val arcs = mutableMapOf<String, ArcEntity>()
+        // Detect arcs (subfolders matching arc patterns) and upsert them in place.
         val arcFolders = novelFolder.listFiles()
             .filter { it.isDirectory && isArcFolder(it.name ?: "") }
+        val arcs = mutableMapOf<String, ArcEntity>()
+        val seenArcIds = mutableSetOf<String>()
         arcFolders.forEachIndexed { idx, arcFolder ->
             val arcName = arcFolder.name ?: "Arc ${idx + 1}"
             val arcId = UUID.nameUUIDFromBytes("${novelId}:${arcFolder.uri}".toByteArray()).toString()
@@ -63,21 +70,40 @@ class ScannerImpl(private val context: Context) {
             val arc = ArcEntity(id = arcId, novelId = novelId, name = arcName, coverUri = arcCoverUri, position = idx)
             db.arcDao().upsert(arc)
             arcs[arcFolder.uri.toString()] = arc
+            seenArcIds.add(arcId)
+        }
+        // Remove arcs whose folder no longer exists (chapters under it fall back to
+        // novel-level via the ON DELETE SET NULL foreign key rather than being deleted).
+        val existingArcs = db.arcDao().forNovel(novelId)
+        existingArcs.filter { it.id !in seenArcIds }.forEach { stale ->
+            db.arcDao().delete(stale.id)
         }
 
-        // Parse chapter files from root and arc subfolders
-        parseChaptersInFolder(novelFolder, novelId, null, db)
+        // Parse chapter files from root and arc subfolders, tracking which chapter IDs
+        // are still present so we can remove only the ones that truly vanished.
+        val seenChapterIds = mutableSetOf<String>()
+        seenChapterIds += parseChaptersInFolder(novelFolder, novelId, null, db)
         for (arcFolder in arcFolders) {
             val arcId = arcs[arcFolder.uri.toString()]?.id
-            parseChaptersInFolder(arcFolder, novelId, arcId, db)
+            seenChapterIds += parseChaptersInFolder(arcFolder, novelId, arcId, db)
+        }
+        val existingChapters = db.chapterDao().forNovel(novelId)
+        existingChapters.filter { it.id !in seenChapterIds }.forEach { stale ->
+            db.chapterDao().delete(stale.id)
         }
 
         // Save fingerprint
         db.scanFingerprintDao().upsert(fingerprint)
     }
 
-    private suspend fun parseChaptersInFolder(folder: DocumentFile, novelId: String, arcId: String?, db: AppDatabase) {
+    private suspend fun parseChaptersInFolder(
+        folder: DocumentFile,
+        novelId: String,
+        arcId: String?,
+        db: AppDatabase
+    ): List<String> = withContext(Dispatchers.IO) {
         val files = folder.listFiles().filter { it.isFile && it.name?.matches(Regex("(?i).*\\.(txt|md)$")) == true }
+        val ids = mutableListOf<String>()
         files.forEachIndexed { idx, file ->
             val (number, title) = parseChapter(file.name ?: "Chapter ${idx + 1}")
             val chapterId = UUID.nameUUIDFromBytes("${novelId}:${file.uri}".toByteArray()).toString()
@@ -89,10 +115,10 @@ class ScannerImpl(private val context: Context) {
                 title = title,
                 sourcePath = file.uri.toString()
             )
-            withContext(Dispatchers.IO) {
-                db.chapterDao().upsert(chapter)
-            }
+            db.chapterDao().upsert(chapter)
+            ids.add(chapterId)
         }
+        ids
     }
 
     private fun isArcFolder(folderName: String): Boolean {
