@@ -168,6 +168,21 @@ class MainActivity : ComponentActivity() {
                         // read metadata.json values (so editing the file and rescanning
                         // actually takes effect), falling back to whatever was already saved
                         // only for fields this scan didn't find a value for.
+                        //
+                        // authorId is deliberately NOT included in that fallback (unlike the
+                        // free-text `author` right next to it): ScannerImpl resolves it fresh
+                        // every single scan from that scan's authors/ folder contents (see
+                        // "Linking a fiction to an author" in AUTHOR_PAGE_AND_CHAPTER_REDESIGN.md),
+                        // not just from this fiction's own metadata.json - so unlike `author`/
+                        // `description`/etc, a null `scanned.authorId` isn't "this scan didn't
+                        // look," it's "this scan looked and the link no longer resolves" (the
+                        // authors/<id>.json was deleted or renamed). Falling back to the old
+                        // `existing.authorId` here would make a resolved author link permanent
+                        // even after its source file is gone - the fiction page and chapter
+                        // page would keep pointing at a dead author. Leaving it out of this
+                        // copy() lets `scanned.authorId` (including null) win outright, the
+                        // same way `coverUri` already does by simply not appearing in this
+                        // copy() call's argument list at all.
                         val existing = db.novelDao().findById(scanned.id)
                         val novel = if (existing != null) {
                             val remoteFetched = existing.metadataFetchedAt != null
@@ -175,7 +190,6 @@ class MainActivity : ComponentActivity() {
                                 pageSize = existing.pageSize,
                                 readingStatus = existing.readingStatus,
                                 author = scanned.author ?: existing.author,
-                                authorId = scanned.authorId ?: existing.authorId,
                                 description = if (remoteFetched) existing.description else (scanned.description ?: existing.description),
                                 genres = if (remoteFetched) existing.genres else (scanned.genres ?: existing.genres),
                                 remoteCoverUrl = existing.remoteCoverUrl,

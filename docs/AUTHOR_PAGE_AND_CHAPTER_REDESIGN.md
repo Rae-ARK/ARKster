@@ -1,11 +1,12 @@
 # ARKster — Author Page & Chapter Page Redesign (staged plan)
 
 ## Status
-**Stage 4 — Navigation & wiring, complete.** Stages 1 (data layer), 2
-(`AuthorPageScreen.kt`), and 3 (`ReaderScreen.kt` chapter page redesign) are
-also complete. Stage 0's per-fiction `author.json` placement was superseded
-at Stage 1 kickoff by a root-level `authors/` folder (see "Where
-author.json lives" below).
+**Stage 5 — QA / polish, complete.** All prior stages (1: data layer, 2:
+`AuthorPageScreen.kt`, 3: `ReaderScreen.kt` chapter page redesign, 4:
+navigation & wiring) are also complete - the whole feature described in
+this document has shipped. Stage 0's per-fiction `author.json` placement
+was superseded at Stage 1 kickoff by a root-level `authors/` folder (see
+"Where author.json lives" below).
 
 ## Motivation
 ARKster's whole pitch (see `README.md`) is making a folder of novels *feel*
@@ -260,6 +261,52 @@ Exercise the same edge cases `metadata.json` already has to handle:
 - Malformed/partial JSON in an author file.
 - Missing or unreadable avatar file.
 - Very long bio text in the chapter-page card vs. the full author page.
+
+**QA pass results (code review - no device/emulator available in this
+environment, so this is static verification of `ScannerImpl`/
+`MainActivity`/the UI screens against each case, not an instrumented test
+run):**
+- No `authors/` folder: `findAuthorsFolder` returns null, `scanRoot` treats
+  `discoveredAuthors` as empty, every fiction resolves `authorId = null` -
+  confirmed, byline/avatar/card all render exactly as before this feature.
+- Shared `authorId` across fictions: `NovelDao.byAuthor` returns every row
+  with that id - confirmed, no special-casing needed.
+- Free-text name fallback: `authorIdByNormalizedName` is seeded from
+  `discoveredAuthors` before the fiction loop runs, case/whitespace-
+  normalized on both sides - confirmed.
+- Id collision on `authors/*.json`'s own `"id"` override (including two
+  filenames differing only by case): `scanAuthorsFolder`'s `seenIds` check
+  lowercases before comparing, first file wins, later one skipped via
+  `onProgress`, scan continues - confirmed, no fix needed.
+- Malformed JSON (including valid-but-wrong-shape JSON, e.g. a top-level
+  array instead of an object): `readAuthorMetadata`'s `JSONObject(text)`
+  throws, caught, returns null; caller still adds an `AuthorEntity` using
+  the filename as both id and name - confirmed fail-soft, matches
+  `readLocalMetadata`'s behavior for fiction `metadata.json`.
+- Missing/unreadable avatar: `resolveAuthorAvatarUri`/`findAuthorAvatarUri`
+  return null when nothing matches, both `AuthorAvatar` (author page) and
+  `ReaderAuthorAvatar` (chapter card) render the 🖋️ placeholder - confirmed.
+- Long bio: the author page's "About" card renders it unclamped in a
+  scrolling `LazyColumn` (no overflow risk); the chapter-page card clamps to
+  `BIO_EXCERPT_LENGTH` (160 chars) *and* `maxLines = 3` - confirmed, no
+  visual regression either way.
+- **Bug found and fixed:** author *linking* didn't heal itself. Once a
+  fiction's `authorId` resolved once, `MainActivity`'s `onDiscovered` merge
+  (`scanned.copy(... authorId = scanned.authorId ?: existing.authorId ...)`)
+  fell back to the old id whenever a later scan resolved to null - which
+  happens precisely when the linked `authors/<id>.json` is deleted or
+  renamed. So deleting an author file never actually unlinked the fictions
+  that pointed at it; they'd keep showing a byline link/"About the author"
+  card that led to a page which came back empty (`AuthorDao.findById`
+  returning null). Unlike the free-text `author`/`description`/`genres`
+  fields around it - which legitimately want "scan found nothing, keep the
+  old value" fallback, since they're only refreshed from *this fiction's
+  own* `metadata.json` - `authorId`'s resolution also depends on the
+  *external* `authors/` folder's contents and is fully recomputed every
+  scan regardless of whether `metadata.json` itself changed at all. Fixed
+  by dropping `authorId` from that fallback entirely, so it behaves like
+  `coverUri` already does elsewhere in the same `copy()` call: the freshly
+  scanned value - including null - always wins.
 
 ## Explicitly out of scope
 - Any real Follow/notification/social behavior — ARKster is offline-first
