@@ -89,7 +89,11 @@ fun HomeScreen(
                         .fillMaxWidth()
                         .padding(12.dp),
                     placeholder = { Text("Search novels...") },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") }
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") },
+                    // This material3 version's SearchBar requires a `content` lambda for the
+                    // active-state suggestions area even though `active` is always false here
+                    // (there's no default value for this overload) - nothing to show, so empty.
+                    content = {}
                 )
             }
 

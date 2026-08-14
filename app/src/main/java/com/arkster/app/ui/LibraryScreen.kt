@@ -62,7 +62,7 @@ fun LibraryScreen(
                 .fillMaxWidth()
                 .padding(8.dp)) {
                 LinearProgressIndicator(
-                    progress = { if (total > 0) current.toFloat() / total.toFloat() else 0f },
+                    progress = if (total > 0) current.toFloat() / total.toFloat() else 0f,
                     modifier = Modifier.fillMaxWidth()
                 )
                 Text(
