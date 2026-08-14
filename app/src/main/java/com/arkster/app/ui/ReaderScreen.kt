@@ -29,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,6 +63,10 @@ fun ReaderScreen(
         val max = scrollState.maxValue
         return if (max <= 0) 1f else (scrollState.value.toFloat() / max.toFloat()).coerceIn(0f, 1f)
     }
+
+    // Rough page estimate for the progress readout: ~2000 characters per "page",
+    // matching a typical screenful of body text at the default font size.
+    val estimatedTotalPages = remember(content) { (content.length / 2000).coerceAtLeast(1) }
 
     val backgroundColor = when (readingMode.value) {
         ReadingMode.LIGHT -> Color(0xFFFAF9F6)
@@ -151,8 +156,9 @@ fun ReaderScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     val progressPercent = (currentProgress() * 100).toInt()
+                    val currentPage = (currentProgress() * estimatedTotalPages).toInt().coerceIn(1, estimatedTotalPages)
                     Text(
-                        "$progressPercent% • ${(currentProgress() * 100).toInt()} pages",
+                        "$progressPercent% • page $currentPage of $estimatedTotalPages",
                         style = MaterialTheme.typography.labelSmall,
                         color = textColor.copy(alpha = 0.7f)
                     )

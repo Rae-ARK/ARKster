@@ -17,7 +17,11 @@ class ScannerImpl(private val context: Context) {
     companion object {
         // Bumped because rescan logic changed from delete-all-reinsert to a diff-based
         // upsert, which is required for chapter_overrides to survive a rescan.
-        private const val CURRENT_SCAN_VERSION = 3
+        // v4: fingerprint is now computed from actual file contents (see
+        // computeFingerprint) instead of the novel folder's own lastModified/length,
+        // which many SAF providers don't update on child-file changes. Bumping forces
+        // every existing fingerprint to be treated as stale exactly once.
+        private const val CURRENT_SCAN_VERSION = 4
 
         private val ARC_PATTERNS = listOf(
             Regex("^(?:Arc|Volume|Book|Part)\\s*(\\d+)?", RegexOption.IGNORE_CASE),
@@ -27,7 +31,12 @@ class ScannerImpl(private val context: Context) {
 
     suspend fun scanRoot(
         treeUri: Uri,
-        onDiscovered: suspend (NovelEntity) -> Unit,
+        // Hands back the DocumentFile for the novel's own folder alongside the entity,
+        // so callers (e.g. to then scan its chapters/arcs) don't need to re-list the
+        // root and search for it by name again - that was previously redone once per
+        // novel, making a full scan O(n^2) in the number of novels, and was fragile if
+        // a folder happened to share a name with another entry.
+        onDiscovered: suspend (NovelEntity, DocumentFile) -> Unit,
         onProgress: suspend (current: Int, total: Int, message: String) -> Unit = { _, _, _ -> }
     ) = withContext(Dispatchers.IO) {
         val root = DocumentFile.fromTreeUri(context, treeUri) ?: return@withContext
@@ -40,7 +49,7 @@ class ScannerImpl(private val context: Context) {
                 val id = UUID.nameUUIDFromBytes((treeUri.toString() + ":" + child.uri.toString()).toByteArray()).toString()
                 val coverUri = findCoverUri(child)
                 val novel = NovelEntity(id = id, title = title, author = null, coverUri = coverUri)
-                onDiscovered(novel)
+                onDiscovered(novel, child)
             }
         }
         onProgress(total, total, "Scan complete")
@@ -58,7 +67,9 @@ class ScannerImpl(private val context: Context) {
         // Check if we can skip rescan (incremental optimization)
         val existingFingerprint = db.scanFingerprintDao().forNovel(novelId)
         if (existingFingerprint != null && existingFingerprint.scanVersion == CURRENT_SCAN_VERSION &&
-            existingFingerprint.lastModified == fingerprint.lastModified && existingFingerprint.size == fingerprint.size) {
+            existingFingerprint.lastModified == fingerprint.lastModified &&
+            existingFingerprint.size == fingerprint.size &&
+            existingFingerprint.fileCount == fingerprint.fileCount) {
             // Unchanged, skip rescan
             onProgress("No changes detected")
             return@withContext
@@ -156,20 +167,45 @@ class ScannerImpl(private val context: Context) {
         return Pair(null, title)
     }
 
+    // Walks the novel folder (root + one level of arc subfolders, matching where
+    // chapters actually live) and aggregates real file metadata, rather than trusting
+    // the novel folder DocumentFile's own lastModified()/length(). Many SAF providers
+    // leave a directory's own metadata unchanged when a file inside it is added,
+    // edited, or removed, which would otherwise make the incremental-rescan check
+    // silently miss changes. File count is tracked alongside size/lastModified so a
+    // same-size rename (delete A, add B) still changes the fingerprint.
     private fun computeFingerprint(novelFolder: DocumentFile, novelId: String): ScanFingerprintEntity {
-        val lastModified = novelFolder.lastModified()
-        val size = try {
-            novelFolder.length()
-        } catch (e: Exception) {
-            null
+        var fileCount = 0
+        var maxLastModified = 0L
+        var totalSize = 0L
+
+        fun accumulate(folder: DocumentFile) {
+            folder.listFiles().forEach { entry ->
+                if (entry.isFile) {
+                    fileCount++
+                    val entryModified = entry.lastModified()
+                    if (entryModified > maxLastModified) maxLastModified = entryModified
+                    totalSize += try {
+                        entry.length()
+                    } catch (e: Exception) {
+                        0L
+                    }
+                } else if (entry.isDirectory) {
+                    // Arc subfolders are one level deep; don't recurse further.
+                    accumulate(entry)
+                }
+            }
         }
+        accumulate(novelFolder)
+
         val fingerprintId = UUID.nameUUIDFromBytes("${novelId}:fingerprint".toByteArray()).toString()
         return ScanFingerprintEntity(
             id = fingerprintId,
             novelId = novelId,
             folderUri = novelFolder.uri.toString(),
-            lastModified = if (lastModified > 0) lastModified else null,
-            size = size,
+            lastModified = if (maxLastModified > 0) maxLastModified else null,
+            size = totalSize,
+            fileCount = fileCount,
             scanVersion = CURRENT_SCAN_VERSION
         )
     }

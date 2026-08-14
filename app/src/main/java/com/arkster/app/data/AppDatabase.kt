@@ -16,7 +16,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ScanFingerprintEntity::class,
         ReadingProgressEntity::class
     ],
-    version = 4
+    version = 5
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun novelDao(): NovelDao
@@ -99,10 +99,21 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // Migration from v4 to v5: add file_count to scan_fingerprints. Fingerprints are
+        // now computed by walking the novel folder's actual files rather than reading the
+        // folder's own metadata, so old fingerprint rows are no longer comparable; scan
+        // logic forces a rescan of stale rows via CURRENT_SCAN_VERSION regardless of the
+        // default value backfilled here.
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE scan_fingerprints ADD COLUMN file_count INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun create(context: Context): AppDatabase = Room.databaseBuilder(
             context.applicationContext,
             AppDatabase::class.java,
             "arkster.db"
-        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build()
+        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build()
     }
 }

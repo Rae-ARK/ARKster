@@ -80,7 +80,13 @@ data class ScanFingerprintEntity(
     @PrimaryKey val id: String,
     @ColumnInfo(name = "novel_id") val novelId: String,
     @ColumnInfo(name = "folder_uri") val folderUri: String,
+    // These are aggregated over every file under the novel folder (see
+    // ScannerImpl.computeFingerprint), not the folder's own metadata - many SAF
+    // providers don't update a directory's own lastModified/length when a child
+    // file inside it changes, which would otherwise make the "skip rescan" check
+    // silently miss additions, edits, and removals.
     @ColumnInfo(name = "last_modified") val lastModified: Long?,
     @ColumnInfo(name = "size") val size: Long?,
+    @ColumnInfo(name = "file_count") val fileCount: Int = 0,
     @ColumnInfo(name = "scan_version") val scanVersion: Int = 1  // bump to force full rescan
 )

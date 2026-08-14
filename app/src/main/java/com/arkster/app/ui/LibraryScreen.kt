@@ -123,7 +123,7 @@ fun LibraryScreen(
                         items(recentlyRead) { novel ->
                             Card(
                                 modifier = Modifier
-                                    .clickable(enabled = scanProgress == null) { onNovelSelected(novel) }
+                                    .clickable(enabled = scanProgress == null) { onContinueReading(novel) }
                                     .padding(4.dp)
                             ) {
                                 Column(modifier = Modifier.padding(12.dp)) {

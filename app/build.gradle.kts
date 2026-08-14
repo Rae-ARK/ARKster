@@ -41,6 +41,15 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.activity:activity-compose:1.8.0")
 
+    // Icons.Default.* used throughout the UI (ArrowBack, Sort, FilterList, Brightness4/7,
+    // KeyboardArrowUp/Down, Star, etc.). Declared explicitly rather than relying on
+    // material3 to pull material-icons-core in transitively, since that transitive
+    // dependency was removed in newer material3 releases and some of the icons used
+    // here (Sort, FilterList, Brightness4/7, KeyboardArrowUp/Down) live in the
+    // extended icon set, not the core one.
+    implementation("androidx.compose.material:material-icons-core")
+    implementation("androidx.compose.material:material-icons-extended")
+
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 

@@ -6,7 +6,6 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.documentfile.provider.DocumentFile
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Button
@@ -103,7 +102,7 @@ class MainActivity : ComponentActivity() {
 
     private suspend fun startScan(treeUri: Uri) {
         scanner.scanRoot(treeUri, 
-            onDiscovered = { scanned ->
+            onDiscovered = { scanned, novelFolder ->
                 // scanRoot always builds a fresh NovelEntity with default field values (e.g.
                 // pageSize = 10). Upsert REPLACEs the whole row, so on rescan we'd silently
                 // wipe out anything the user has customized (like their pagination choice)
@@ -115,14 +114,11 @@ class MainActivity : ComponentActivity() {
                     val idx = novels.indexOfFirst { it.id == novel.id }
                     if (idx >= 0) novels[idx] = novel else novels.add(novel)
                 }
-                // After discovering a novel, scan its chapters and arcs
-                val novelFolder = DocumentFile.fromTreeUri(this@MainActivity, treeUri)
-                    ?.listFiles()?.find { it.name == novel.title && it.isDirectory }
-                if (novelFolder != null) {
-                    scanner.scanChaptersForNovel(novelFolder, novel.id, db) { message ->
-                        withContext(Dispatchers.Main) {
-                            scanMessage.value = "Scanning ${novel.title}: $message"
-                        }
+                // Scan this novel's chapters/arcs using the folder scanRoot already
+                // resolved, instead of re-listing the root and searching by name again.
+                scanner.scanChaptersForNovel(novelFolder, novel.id, db) { message ->
+                    withContext(Dispatchers.Main) {
+                        scanMessage.value = "Scanning ${novel.title}: $message"
                     }
                 }
             },
