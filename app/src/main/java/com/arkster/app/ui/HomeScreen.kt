@@ -19,6 +19,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.draw.clip
+import coil.compose.AsyncImage
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Search
@@ -305,6 +307,10 @@ fun FeaturedSection(
     if (featured.isEmpty()) return
 
     val novel = featured.first()
+    // Local cover.png from the scanned folder takes priority over a remote metadata
+    // cover (only present after "Fetch info" has been run) - the local file is the
+    // one the user actually placed there.
+    val coverUrl = novel.coverUri ?: novel.remoteCoverUrl
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -316,18 +322,33 @@ fun FeaturedSection(
             containerColor = MaterialTheme.colorScheme.surfaceVariant
         )
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    brush = Brush.verticalGradient(
-                        colors = listOf(
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+        Box(modifier = Modifier.fillMaxSize()) {
+            if (coverUrl != null) {
+                AsyncImage(
+                    model = coverUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        brush = Brush.verticalGradient(
+                            colors = if (coverUrl != null) {
+                                // Cover art present: a bottom-heavy dark scrim so the
+                                // title/author text stays legible over the image.
+                                listOf(Color.Transparent, Color.Black.copy(alpha = 0.75f))
+                            } else {
+                                listOf(
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                                )
+                            }
                         )
                     )
-                )
-        ) {
+            ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -358,6 +379,7 @@ fun FeaturedSection(
                     }
                 }
             }
+            }
         }
     }
 }
@@ -384,21 +406,28 @@ fun NovelCardVertical(
                 .padding(8.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // Cover placeholder
+            // Cover art - falls back to the emoji placeholder only when the novel has
+            // neither a local cover.png (from the scanned folder) nor a remote cover
+            // (from "Fetch info").
+            val coverUrl = novel.coverUri ?: novel.remoteCoverUrl
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(140.dp)
-                    .background(
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                        shape = RoundedCornerShape(4.dp)
-                    ),
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    "📚",
-                    fontSize = 40.sp
-                )
+                if (coverUrl != null) {
+                    AsyncImage(
+                        model = coverUrl,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Text("📚", fontSize = 40.sp)
+                }
             }
 
             Column(modifier = Modifier.fillMaxWidth()) {
@@ -437,23 +466,45 @@ fun NovelContinueCard(
                 .padding(12.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            Column {
-                Text(
-                    novel.title,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-                if (!novel.author.isNullOrBlank()) {
+            Row {
+                val coverUrl = novel.coverUri ?: novel.remoteCoverUrl
+                Box(
+                    modifier = Modifier
+                        .width(40.dp)
+                        .height(56.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (coverUrl != null) {
+                        AsyncImage(
+                            model = coverUrl,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        Text("📚", fontSize = 18.sp)
+                    }
+                }
+                Column(modifier = Modifier.padding(start = 8.dp)) {
                     Text(
-                        novel.author!!,
+                        novel.title,
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        fontSize = 10.sp
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
                     )
+                    if (!novel.author.isNullOrBlank()) {
+                        Text(
+                            novel.author!!,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            fontSize = 10.sp
+                        )
+                    }
                 }
             }
 

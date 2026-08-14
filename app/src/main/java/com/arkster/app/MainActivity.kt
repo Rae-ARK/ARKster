@@ -28,7 +28,6 @@ import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import com.arkster.app.ui.ChapterEditorScreen
 import com.arkster.app.ui.HomeScreen
-import com.arkster.app.ui.LibraryScreen
 import com.arkster.app.ui.MetadataSearchDialog
 import com.arkster.app.ui.NovelDetailScreen
 import com.arkster.app.ui.ReaderScreen
@@ -54,7 +53,6 @@ import java.util.UUID
 
 sealed class Screen {
     object Home : Screen()
-    object Library : Screen()
     data class NovelDetail(val novel: NovelEntity) : Screen()
     data class Reader(val novelId: String, val chapter: ChapterEntity, val content: String) : Screen()
     data class ChapterEditor(val novel: NovelEntity) : Screen()
@@ -547,48 +545,6 @@ class MainActivity : ComponentActivity() {
                             )
                         }
 
-                        is Screen.Library -> {
-                            // NOTE: there used to be a stray `Button("Rescan")` composed here,
-                            // above/outside LibraryScreen's own Column. It wasn't wrapped in any
-                            // layout that accounts for the status bar, so it rendered as a
-                            // floating pill overlapping the status bar icons on every launch of
-                            // this screen. It was also misleading - it always launched the folder
-                            // picker even when labeled "Rescan", instead of actually rescanning
-                            // the already-selected folder like Settings' "Rescan Library" does.
-                            // Removed; the properly-wired rescan/select-folder flow already
-                            // lives in Settings (reachable via the gear icon LibraryScreen
-                            // already renders in its own TopAppBar).
-                            LibraryScreen(
-                                novels = novels,
-                                recentlyRead = recentlyRead,
-                                inProgressNovels = inProgressNovels,
-                                scanProgress = scanProgress.value,
-                                scanMessage = scanMessage.value,
-                                onNovelSelected = { novel ->
-                                    lifecycleScope.launch {
-                                        loadNovelDetails(novel)
-                                        currentScreen.value = Screen.NovelDetail(novel)
-                                    }
-                                },
-                                onContinueReading = { novel ->
-                                    lifecycleScope.launch {
-                                        val lastProgress = db.readingProgressDao().forNovel(novel.id)
-                                        if (lastProgress != null) {
-                                            val chapter = db.chapterDao().findById(lastProgress.chapterId)
-                                            if (chapter != null) {
-                                                val chapterContent = contentRepo.getTextContent(chapter.sourcePath)
-                                                currentScreen.value = Screen.Reader(novel.id, chapter, chapterContent.body)
-                                            }
-                                        } else {
-                                            loadNovelDetails(novel)
-                                            currentScreen.value = Screen.NovelDetail(novel)
-                                        }
-                                    }
-                                },
-                                onSettingsClick = { currentScreen.value = Screen.Settings }
-                            )
-                        }
-
                         is Screen.NovelDetail -> {
                             val novel = (currentScreen.value as Screen.NovelDetail).novel
                             NovelDetailScreen(
@@ -596,7 +552,7 @@ class MainActivity : ComponentActivity() {
                                 chapters = chapters,
                                 arcs = arcs,
                                 overriddenChapterIds = overriddenChapterIds.value,
-                                onBack = { currentScreen.value = Screen.Library },
+                                onBack = { currentScreen.value = Screen.Home },
                                 onChapterSelected = { chapter ->
                                     lifecycleScope.launch {
                                         // Mark novel as IN_PROGRESS when starting to read
@@ -625,7 +581,7 @@ class MainActivity : ComponentActivity() {
                                 onBack = { progress ->
                                     lifecycleScope.launch {
                                         saveReadingProgress(reader.novelId, reader.chapter.id, progress)
-                                        currentScreen.value = Screen.Library
+                                        currentScreen.value = Screen.Home
                                     }
                                 }
                             )

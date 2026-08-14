@@ -42,10 +42,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.arkster.app.data.NovelEntity
 
 enum class SortBy {
@@ -272,7 +274,9 @@ fun EnhancedNovelCard(
                 .fillMaxWidth()
                 .background(MaterialTheme.colorScheme.surfaceVariant)
         ) {
-            // Cover area
+            // Cover area - local cover.png from the scanned folder takes priority over
+            // a remote metadata cover (only present after "Fetch info" has been run).
+            val coverUrl = novel.coverUri ?: novel.remoteCoverUrl
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -287,7 +291,16 @@ fun EnhancedNovelCard(
                     ),
                 contentAlignment = Alignment.Center
             ) {
-                Text("📖", fontSize = 60.sp)
+                if (coverUrl != null) {
+                    AsyncImage(
+                        model = coverUrl,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Text("📖", fontSize = 60.sp)
+                }
 
                         // Status badge
                         if (novel.readingStatus != "NOT_STARTED") {
