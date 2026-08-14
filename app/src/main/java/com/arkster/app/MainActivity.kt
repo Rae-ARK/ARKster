@@ -613,12 +613,19 @@ class MainActivity : ComponentActivity() {
                             val previousChapter = chapters.getOrNull(currentIndex - 1).takeIf { currentIndex > 0 }
                             val nextChapter = chapters.getOrNull(currentIndex + 1).takeIf { currentIndex >= 0 }
                             val arcTitle = reader.chapter.arcId?.let { arcId -> arcs.firstOrNull { it.id == arcId }?.name }
+                            // Arc cover -> fiction cover -> null (renders the placeholder) - see
+                            // bugs.md Bug 3b. Resolved here rather than in ReaderScreen so it stays
+                            // decoupled from ArcEntity/NovelEntity, same rationale as novelTitle/arcTitle.
+                            val readerCoverUri = reader.chapter.arcId
+                                ?.let { arcId -> arcs.firstOrNull { it.id == arcId }?.coverUri }
+                                ?: novel?.coverUri
                             ReaderScreen(
                                 chapter = reader.chapter,
                                 content = reader.content,
                                 appTheme = currentTheme.value,
                                 novelTitle = novel?.title,
                                 arcTitle = arcTitle,
+                                coverUri = readerCoverUri,
                                 author = readerAuthor.value,
                                 onBack = { progress ->
                                     lifecycleScope.launch {

@@ -82,6 +82,12 @@ fun ReaderScreen(
     // stays decoupled from the data layer beyond the ChapterEntity it already took.
     novelTitle: String? = null,
     arcTitle: String? = null,
+    // Resolution order handled by the caller (arc cover -> fiction cover -> null, see
+    // bugs.md Bug 3b): arc's own ArcEntity.coverUri if this chapter belongs to an arc
+    // that has one, else the fiction's NovelEntity.coverUri, else null. Null renders
+    // the same placeholder ReaderAuthorAvatar/AuthorPageScreen already use elsewhere,
+    // rather than leaving a blank gap.
+    coverUri: String? = null,
     // Sourced from the same author.json-backed AuthorEntity the Stage 2 AuthorPageScreen
     // reads - see AUTHOR_PAGE_AND_CHAPTER_REDESIGN.md's Stage 3 section. Null renders no
     // "About the author" card at all, same as a fiction with no linked author today.
@@ -152,37 +158,41 @@ fun ReaderScreen(
             // Road's chapter-page top block. Only rendered when the caller has a title to
             // show - existing callers that don't pass novelTitle see no change at all.
             if (novelTitle != null) {
-                Column(
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 24.dp, vertical = 8.dp)
+                        .padding(horizontal = 24.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.Top
                 ) {
-                    Row(
-                        modifier = Modifier.clickable { onBackToFiction(currentProgress()) },
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            Icons.Filled.ArrowBack,
-                            contentDescription = null,
-                            modifier = Modifier.size(14.dp),
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Text(
-                            novelTitle,
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(start = 4.dp)
-                        )
-                    }
-                    if (!arcTitle.isNullOrBlank()) {
-                        Text(
-                            arcTitle,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = textColor.copy(alpha = 0.7f),
-                            modifier = Modifier.padding(top = 4.dp)
-                        )
+                    ReaderCoverThumbnail(coverUri = coverUri, modifier = Modifier.size(width = 40.dp, height = 56.dp))
+                    Column(modifier = Modifier.padding(start = 12.dp)) {
+                        Row(
+                            modifier = Modifier.clickable { onBackToFiction(currentProgress()) },
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Filled.ArrowBack,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                novelTitle,
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(start = 4.dp)
+                            )
+                        }
+                        if (!arcTitle.isNullOrBlank()) {
+                            Text(
+                                arcTitle,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = textColor.copy(alpha = 0.7f),
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -480,6 +490,31 @@ private fun AboutAuthorCard(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ReaderCoverThumbnail(coverUri: String?, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+        contentAlignment = Alignment.Center
+    ) {
+        if (coverUri != null) {
+            AsyncImage(
+                model = coverUri,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            // Same missing-image placeholder pattern as ReaderAuthorAvatar / the rest of
+            // the app - see bugs.md Bug 3b. The caller (MainActivity) is responsible for
+            // resolving arc cover -> fiction cover -> null before this is reached, so a
+            // null here genuinely means neither exists, not that resolution was skipped.
+            Text("📕", fontSize = 20.sp)
         }
     }
 }

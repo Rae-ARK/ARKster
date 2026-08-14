@@ -197,3 +197,37 @@ Still open:
   fine for `~2 Side Story.txt`, but a marker glued straight to a number
   with no space (`~2Side Story.txt`) won't match and falls back to
   filename-order within its tier. Flag if that's a real pattern in use.
+
+---
+
+## Stage 3 status
+
+Fixed:
+
+- **Bug 3b** — the reader page now shows a cover thumbnail next to the
+  fiction-title breadcrumb, resolved arc → fiction → placeholder exactly
+  as requested:
+  - `MainActivity.kt` (the `Screen.Reader` branch) now computes
+    `readerCoverUri = arcs.firstOrNull { it.id == reader.chapter.arcId }?.coverUri
+    ?: novel?.coverUri` and passes it into `ReaderScreen` as a new
+    `coverUri: String?` parameter (defaults to `null`, so this is
+    source-compatible with any other call site).
+  - `ReaderScreen.kt` renders it via a new `ReaderCoverThumbnail`
+    composable — same `AsyncImage`-or-emoji-placeholder pattern already
+    used by `ReaderAuthorAvatar`, so a genuinely missing cover (neither
+    arc nor fiction has one) shows the 📕 placeholder instead of a blank
+    gap or a crash.
+  - The resolution order is deliberately done in `MainActivity.kt`, not
+    `ReaderScreen.kt`, matching how `novelTitle`/`arcTitle` are already
+    resolved outside the screen composable — keeps `ReaderScreen` decoupled
+    from `ArcEntity`/`NovelEntity`.
+
+Still open:
+
+- **Bug 1** — still needs the screenshot/repro detail from the original
+  report; not addressed in this patch either. Nothing in the three stages
+  so far touches whatever "first img" refers to.
+
+### Files touched this stage
+- `app/src/main/java/com/arkster/app/ui/ReaderScreen.kt` — `coverUri` param, `ReaderCoverThumbnail`
+- `app/src/main/java/com/arkster/app/MainActivity.kt` — resolves `readerCoverUri` and passes it through
