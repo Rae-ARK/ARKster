@@ -54,6 +54,32 @@ fun ChapterEditorScreen(
         }
     }
 
+    // Look up by id rather than by list index/object identity - updateTitle() replaces
+    // every ChapterEntity with a new copy() on every keystroke, so a `chapter` reference
+    // captured in a button's onClick can go stale and stop matching anything in
+    // editedChapters.value via indexOf(), silently breaking reordering.
+    fun moveUp(chapterId: String) {
+        val currentIdx = editedChapters.value.indexOfFirst { it.id == chapterId }
+        if (currentIdx > 0) {
+            val updatedList = editedChapters.value.toMutableList()
+            val temp = updatedList[currentIdx]
+            updatedList[currentIdx] = updatedList[currentIdx - 1]
+            updatedList[currentIdx - 1] = temp
+            editedChapters.value = updatedList
+        }
+    }
+
+    fun moveDown(chapterId: String) {
+        val currentIdx = editedChapters.value.indexOfFirst { it.id == chapterId }
+        if (currentIdx in 0 until editedChapters.value.size - 1) {
+            val updatedList = editedChapters.value.toMutableList()
+            val temp = updatedList[currentIdx]
+            updatedList[currentIdx] = updatedList[currentIdx + 1]
+            updatedList[currentIdx + 1] = temp
+            editedChapters.value = updatedList
+        }
+    }
+
     Column(modifier = Modifier.fillMaxWidth()) {
         TopAppBar(
             title = { Text("Edit Chapters") },
@@ -76,31 +102,11 @@ fun ChapterEditorScreen(
                         )
 
                         Row(modifier = Modifier.padding(top = 8.dp)) {
-                            IconButton(onClick = {
-                                // Re-order: move up
-                                val currentIdx = editedChapters.value.indexOf(chapter)
-                                if (currentIdx > 0) {
-                                    val updatedList = editedChapters.value.toMutableList()
-                                    val temp = updatedList[currentIdx]
-                                    updatedList[currentIdx] = updatedList[currentIdx - 1]
-                                    updatedList[currentIdx - 1] = temp
-                                    editedChapters.value = updatedList
-                                }
-                            }) {
+                            IconButton(onClick = { moveUp(chapter.id) }) {
                                 Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move up")
                             }
 
-                            IconButton(onClick = {
-                                // Re-order: move down
-                                val currentIdx = editedChapters.value.indexOf(chapter)
-                                if (currentIdx < editedChapters.value.size - 1) {
-                                    val updatedList = editedChapters.value.toMutableList()
-                                    val temp = updatedList[currentIdx]
-                                    updatedList[currentIdx] = updatedList[currentIdx + 1]
-                                    updatedList[currentIdx + 1] = temp
-                                    editedChapters.value = updatedList
-                                }
-                            }) {
+                            IconButton(onClick = { moveDown(chapter.id) }) {
                                 Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move down")
                             }
 

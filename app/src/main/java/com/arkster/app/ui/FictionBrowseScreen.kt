@@ -74,24 +74,29 @@ fun FictionBrowseScreen(
     val sortSheetState = rememberModalBottomSheetState()
     val filterSheetState = rememberModalBottomSheetState()
 
-    // Apply filters and sorting
-    var filtered = novels.filter { novel ->
-        novel.title.contains(searchQuery.value, ignoreCase = true) ||
-        (novel.author?.contains(searchQuery.value, ignoreCase = true) ?: false)
-    }
+    // Apply filters and sorting. Recomputed only when an actual input changes (rather
+    // than on every recomposition) so MOST_POPULAR/HIGHEST_RATED - which currently
+    // stand in for real ranking with a shuffle - don't visibly re-shuffle the grid
+    // every time the screen recomposes for an unrelated reason.
+    val filtered = remember(novels, searchQuery.value, selectedStatus.value, selectedSort.value) {
+        var result = novels.filter { novel ->
+            novel.title.contains(searchQuery.value, ignoreCase = true) ||
+            (novel.author?.contains(searchQuery.value, ignoreCase = true) ?: false)
+        }
 
-    filtered = when (selectedStatus.value) {
-        StatusFilter.IN_PROGRESS -> filtered.filter { it.readingStatus == "IN_PROGRESS" }
-        StatusFilter.COMPLETED -> filtered.filter { it.readingStatus == "COMPLETED" }
-        StatusFilter.NOT_STARTED -> filtered.filter { it.readingStatus == "NOT_STARTED" }
-        StatusFilter.ALL -> filtered
-    }
+        result = when (selectedStatus.value) {
+            StatusFilter.IN_PROGRESS -> result.filter { it.readingStatus == "IN_PROGRESS" }
+            StatusFilter.COMPLETED -> result.filter { it.readingStatus == "COMPLETED" }
+            StatusFilter.NOT_STARTED -> result.filter { it.readingStatus == "NOT_STARTED" }
+            StatusFilter.ALL -> result
+        }
 
-    filtered = when (selectedSort.value) {
-        SortBy.RECENTLY_UPDATED -> filtered.sortedByDescending { it.title }  // Would use timestamp in production
-        SortBy.MOST_POPULAR -> filtered.shuffled()  // Would use view count
-        SortBy.HIGHEST_RATED -> filtered.shuffled()  // Would use rating
-        SortBy.NEWEST -> filtered.reversed()
+        when (selectedSort.value) {
+            SortBy.RECENTLY_UPDATED -> result.sortedByDescending { it.title }  // Would use timestamp in production
+            SortBy.MOST_POPULAR -> result.shuffled()  // Would use view count
+            SortBy.HIGHEST_RATED -> result.shuffled()  // Would use rating
+            SortBy.NEWEST -> result.reversed()
+        }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {

@@ -21,6 +21,7 @@ import com.arkster.app.data.Theme
 @Composable
 fun SettingsScreen(
     currentTheme: Theme,
+    hasLibrary: Boolean = true,
     onThemeSelected: (Theme) -> Unit,
     onRescan: () -> Unit,
     onBack: () -> Unit
@@ -53,7 +54,7 @@ fun SettingsScreen(
                     .fillMaxWidth()
                     .padding(top = 16.dp)
             ) {
-                Text("Rescan Library")
+                Text(if (hasLibrary) "Rescan Library" else "Select Library Folder")
             }
         }
     }

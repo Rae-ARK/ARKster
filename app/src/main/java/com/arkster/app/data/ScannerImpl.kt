@@ -179,7 +179,7 @@ class ScannerImpl(private val context: Context) {
         var maxLastModified = 0L
         var totalSize = 0L
 
-        fun accumulate(folder: DocumentFile) {
+        fun accumulateFiles(folder: DocumentFile) {
             folder.listFiles().forEach { entry ->
                 if (entry.isFile) {
                     fileCount++
@@ -190,13 +190,18 @@ class ScannerImpl(private val context: Context) {
                     } catch (e: Exception) {
                         0L
                     }
-                } else if (entry.isDirectory) {
-                    // Arc subfolders are one level deep; don't recurse further.
-                    accumulate(entry)
                 }
+                // Directories at this level are skipped here; they're walked explicitly
+                // one level down below, matching where chapters actually live.
             }
         }
-        accumulate(novelFolder)
+        // Root-level files, plus exactly one level into each subfolder (arc folders).
+        // Deliberately NOT recursive - a genuinely recursive walk would keep descending
+        // into arbitrarily deep folder trees the scanner never reads chapters from,
+        // which both wastes time and would make the fingerprint sensitive to changes
+        // scanChaptersForNovel() doesn't even look at.
+        accumulateFiles(novelFolder)
+        novelFolder.listFiles().filter { it.isDirectory }.forEach { accumulateFiles(it) }
 
         val fingerprintId = UUID.nameUUIDFromBytes("${novelId}:fingerprint".toByteArray()).toString()
         return ScanFingerprintEntity(

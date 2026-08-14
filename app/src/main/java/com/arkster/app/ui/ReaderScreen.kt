@@ -41,9 +41,22 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.arkster.app.data.ChapterEntity
+import com.arkster.app.data.Theme
 
 enum class ReadingMode {
     LIGHT, SEPIA, DARK
+}
+
+// Reader's own LIGHT/SEPIA/DARK palette is intentionally separate from the app-wide
+// Theme (it needs a sepia option Theme doesn't have, and users may want a different
+// reading background than their nav-screen background) - but it should still *start*
+// aligned with the app theme rather than always opening in LIGHT regardless of what
+// the user picked in Settings, which read as the app "forgetting" a Dark/Warm Paper
+// preference every time a chapter was opened.
+private fun readingModeFor(theme: Theme): ReadingMode = when (theme) {
+    Theme.LIGHT -> ReadingMode.LIGHT
+    Theme.DARK -> ReadingMode.DARK
+    Theme.WARM_PAPER -> ReadingMode.SEPIA
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -51,11 +64,12 @@ enum class ReadingMode {
 fun ReaderScreen(
     chapter: ChapterEntity,
     content: String,
+    appTheme: Theme = Theme.LIGHT,
     onBack: (Float) -> Unit
 ) {
     val fontSize = remember { mutableFloatStateOf(18f) }
     val lineHeight = remember { mutableFloatStateOf(1.8f) }
-    val readingMode = remember { mutableStateOf(ReadingMode.LIGHT) }
+    val readingMode = remember { mutableStateOf(readingModeFor(appTheme)) }
     val showControls = remember { mutableStateOf(true) }
     val scrollState = rememberScrollState()
 

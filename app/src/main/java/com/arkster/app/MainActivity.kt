@@ -14,11 +14,15 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import com.arkster.app.ui.ChapterEditorScreen
 import com.arkster.app.ui.HomeScreen
@@ -241,7 +245,19 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            MaterialTheme(colorScheme = colorSchemeFor(currentTheme.value)) {
+            val colorScheme = colorSchemeFor(currentTheme.value)
+            MaterialTheme(colorScheme = colorScheme) {
+                // The activity's manifest theme is static (always light), so without this
+                // the system status bar icons stay dark-on-dark whenever the user picks
+                // the Dark theme in Settings, and dark-on-light for Warm Paper's lower
+                // contrast background - both unreadable. Recompute on every theme change
+                // instead of once, since currentTheme can change at runtime.
+                val view = LocalView.current
+                SideEffect {
+                    WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars =
+                        colorScheme.background.luminance() > 0.5f
+                }
+
                 Column(modifier = Modifier.fillMaxSize()) {
                     val savedUri = prefsManager.libraryUri.collectAsState(initial = null)
 
@@ -277,7 +293,8 @@ class MainActivity : ComponentActivity() {
                                     if (query.isNotEmpty()) {
                                         currentScreen.value = Screen.FictionBrowse
                                     }
-                                }
+                                },
+                                onSelectFolderClick = { pickFolder.launch(null) }
                             )
                         }
 
@@ -360,6 +377,7 @@ class MainActivity : ComponentActivity() {
                             ReaderScreen(
                                 chapter = reader.chapter,
                                 content = reader.content,
+                                appTheme = currentTheme.value,
                                 onBack = { progress ->
                                     lifecycleScope.launch {
                                         saveReadingProgress(reader.novelId, reader.chapter.id, progress)
@@ -384,17 +402,24 @@ class MainActivity : ComponentActivity() {
                         is Screen.Settings -> {
                             SettingsScreen(
                                 currentTheme = currentTheme.value,
+                                hasLibrary = savedUri.value != null,
                                 onThemeSelected = { theme ->
                                     lifecycleScope.launch {
                                         prefsManager.setTheme(theme)
                                     }
                                 },
                                 onRescan = {
-                                    lifecycleScope.launch {
-                                        savedUri.value?.let { uri ->
+                                    val currentUri = savedUri.value
+                                    if (currentUri != null) {
+                                        lifecycleScope.launch {
                                             novels.clear()
-                                            startScan(Uri.parse(uri))
+                                            startScan(Uri.parse(currentUri))
                                         }
+                                    } else {
+                                        // No library selected yet - "Rescan" would previously
+                                        // silently do nothing here. Send the user to the
+                                        // picker instead.
+                                        pickFolder.launch(null)
                                     }
                                 },
                                 onBack = { currentScreen.value = Screen.Home }
