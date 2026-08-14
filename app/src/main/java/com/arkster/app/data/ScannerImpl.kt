@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import java.util.UUID
 
 /**
@@ -65,7 +66,21 @@ class ScannerImpl(private val context: Context) {
                         val title = child.name ?: "Unknown"
                         val id = UUID.nameUUIDFromBytes((treeUri.toString() + ":" + child.uri.toString()).toByteArray()).toString()
                         val coverUri = findCoverUri(child)
-                        val novel = NovelEntity(id = id, title = title, author = null, coverUri = coverUri)
+                        // Optional per-novel metadata.json in the novel's own folder, next to
+                        // cover.* and the chapter/arc folders - see readLocalMetadata() for the
+                        // schema. Lets a user set title/author/description/genres/publishedDate
+                        // by hand (or via a script) without needing the "Fetch info" lookup,
+                        // which only searches Google Books and mostly won't have web novels.
+                        val localMetadata = readLocalMetadata(child)
+                        val novel = NovelEntity(
+                            id = id,
+                            title = localMetadata?.title?.takeIf { it.isNotBlank() } ?: title,
+                            author = localMetadata?.author,
+                            coverUri = coverUri,
+                            description = localMetadata?.description,
+                            genres = localMetadata?.genres,
+                            publishedDate = localMetadata?.publishedDate
+                        )
                         onDiscovered(novel, child)
                     } catch (e: Exception) {
                         // Don't let one bad/inaccessible novel folder abort the whole scan.
@@ -252,5 +267,55 @@ class ScannerImpl(private val context: Context) {
     private fun findCoverUri(folder: DocumentFile): String? {
         val imgs = folder.listFiles().filter { it.isFile && it.name?.matches(Regex("(?i)cover\\.(jpg|png|webp)$")) == true }
         return imgs.firstOrNull()?.uri?.toString()
+    }
+
+    private data class LocalMetadata(
+        val title: String?,
+        val author: String?,
+        val description: String?,
+        val genres: String?,
+        val publishedDate: String?
+    )
+
+    // Reads an optional `metadata.json` sitting directly in the novel's folder, e.g.:
+    // {
+    //   "title": "Summoned By Mistake, I Decided To Learn How To Live",
+    //   "author": "Some Author",
+    //   "description": "A short synopsis...",
+    //   "genres": ["Fantasy", "Isekai"],
+    //   "publishedDate": "2023"
+    // }
+    // All fields are optional and applied only where present - a missing/unparseable
+    // file just means no local metadata, never a scan failure (this is loaded once per
+    // novel on every scan, so a bad file simply doesn't override anything that scan).
+    // "genres" accepts either a JSON array of strings or a single comma-separated string.
+    private fun readLocalMetadata(folder: DocumentFile): LocalMetadata? {
+        val file = folder.listFiles().firstOrNull {
+            it.isFile && it.name?.equals("metadata.json", ignoreCase = true) == true
+        } ?: return null
+        return try {
+            val text = context.contentResolver.openInputStream(file.uri)
+                ?.bufferedReader()
+                ?.use { it.readText() } ?: return null
+            val json = JSONObject(text)
+            val genresArray = json.optJSONArray("genres")
+            val genres = if (genresArray != null) {
+                (0 until genresArray.length()).joinToString(", ") { genresArray.optString(it) }
+            } else {
+                json.optString("genres").takeIf { it.isNotBlank() }
+            }
+            LocalMetadata(
+                title = json.optString("title").takeIf { it.isNotBlank() },
+                author = json.optString("author").takeIf { it.isNotBlank() },
+                description = json.optString("description").takeIf { it.isNotBlank() },
+                genres = genres,
+                publishedDate = json.optString("publishedDate").takeIf { it.isNotBlank() }
+            )
+        } catch (e: Exception) {
+            // Malformed metadata.json shouldn't take down the scan for this novel - it
+            // just means this novel falls back to folder-name title / no metadata, same
+            // as if the file weren't there.
+            null
+        }
     }
 }

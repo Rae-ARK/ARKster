@@ -72,9 +72,17 @@ sealed class MetadataSearchState {
 
 // Warm, sepia-toned reading theme - lower contrast than pure light/dark, meant to
 // be easier on the eyes for long reading sessions (a common e-reader "paper" mode).
+//
+// NOTE: primaryContainer/onPrimaryContainer are explicitly set here too. Every other
+// role above overrides lightColorScheme()'s default, but these two were left out -
+// so anything using them (e.g. HomeScreen's "Browse All Novels" card) fell back to
+// Material3's stock light-purple/dark-purple pair, which clashes with this warm/sepia
+// palette and is what made that button look inconsistent with the rest of the theme.
 private fun warmPaperColorScheme() = lightColorScheme(
     primary = Color(0xFF8B5E34),
     onPrimary = Color(0xFFFFFBF5),
+    primaryContainer = Color(0xFFD9BE97),
+    onPrimaryContainer = Color(0xFF3E2C1C),
     background = Color(0xFFF5ECD9),
     onBackground = Color(0xFF3E2C1C),
     surface = Color(0xFFF0E4CB),
@@ -132,24 +140,30 @@ class MainActivity : ComponentActivity() {
             scanner.scanRoot(treeUri,
                 onDiscovered = { scanned, novelFolder ->
                     try {
-                        // scanRoot always builds a fresh NovelEntity with default field values
-                        // (e.g. pageSize = 10). Upsert REPLACEs the whole row, so on rescan
-                        // we'd silently wipe out anything the user has customized (like their
-                        // pagination choice) unless we carry it over from the existing row first.
+                        // scanRoot builds a fresh NovelEntity every scan - pageSize and
+                        // readingStatus are always defaults on it, and description/genres/
+                        // publishedDate/author come from this novel's metadata.json if one
+                        // exists (readLocalMetadata in ScannerImpl), null otherwise. Upsert()
+                        // REPLACEs the whole row, so without carrying values over from the
+                        // existing row, a rescan would silently wipe pageSize/readingStatus,
+                        // and - once a remote "Fetch info" lookup has actually run for this
+                        // novel (existing.metadataFetchedAt != null) - would let a rescan
+                        // clobber that curated remote data with an empty/stale local
+                        // metadata.json. Before any remote fetch, prefer this scan's freshly
+                        // read metadata.json values (so editing the file and rescanning
+                        // actually takes effect), falling back to whatever was already saved
+                        // only for fields this scan didn't find a value for.
                         val existing = db.novelDao().findById(scanned.id)
-                        // upsert() REPLACEs the whole row, and scanned is always a fresh
-                        // NovelEntity with every optional field at its default - so a
-                        // rescan would otherwise silently wipe pageSize, reading status,
-                        // and any fetched metadata every single time. Carry all of it
-                        // over from the existing row, not just pageSize.
                         val novel = if (existing != null) {
+                            val remoteFetched = existing.metadataFetchedAt != null
                             scanned.copy(
                                 pageSize = existing.pageSize,
                                 readingStatus = existing.readingStatus,
-                                description = existing.description,
-                                genres = existing.genres,
+                                author = scanned.author ?: existing.author,
+                                description = if (remoteFetched) existing.description else (scanned.description ?: existing.description),
+                                genres = if (remoteFetched) existing.genres else (scanned.genres ?: existing.genres),
                                 remoteCoverUrl = existing.remoteCoverUrl,
-                                publishedDate = existing.publishedDate,
+                                publishedDate = if (remoteFetched) existing.publishedDate else (scanned.publishedDate ?: existing.publishedDate),
                                 externalSourceUrl = existing.externalSourceUrl,
                                 metadataFetchedAt = existing.metadataFetchedAt
                             )
