@@ -13,6 +13,9 @@ interface NovelDao {
     @Query("SELECT * FROM novels ORDER BY title")
     suspend fun all(): List<NovelEntity>
 
+    @Query("SELECT * FROM novels WHERE id = :novelId")
+    suspend fun findById(novelId: String): NovelEntity?
+
     @Query("UPDATE novels SET page_size = :pageSize WHERE id = :novelId")
     suspend fun updatePageSize(novelId: String, pageSize: Int)
 }

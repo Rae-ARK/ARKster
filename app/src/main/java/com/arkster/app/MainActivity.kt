@@ -12,11 +12,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.lifecycleScope
 import com.arkster.app.ui.ChapterEditorScreen
 import com.arkster.app.ui.LibraryScreen
@@ -46,12 +49,33 @@ sealed class Screen {
     object Settings : Screen()
 }
 
+// Warm, sepia-toned reading theme - lower contrast than pure light/dark, meant to
+// be easier on the eyes for long reading sessions (a common e-reader "paper" mode).
+private fun warmPaperColorScheme() = lightColorScheme(
+    primary = Color(0xFF8B5E34),
+    onPrimary = Color(0xFFFFFBF5),
+    background = Color(0xFFF5ECD9),
+    onBackground = Color(0xFF3E2C1C),
+    surface = Color(0xFFF0E4CB),
+    onSurface = Color(0xFF3E2C1C),
+    surfaceVariant = Color(0xFFE6D7B8),
+    onSurfaceVariant = Color(0xFF4E3B26)
+)
+
+private fun colorSchemeFor(theme: Theme) = when (theme) {
+    Theme.LIGHT -> lightColorScheme()
+    Theme.DARK -> darkColorScheme()
+    Theme.WARM_PAPER -> warmPaperColorScheme()
+}
+
 class MainActivity : ComponentActivity() {
 
     private val novels = mutableStateListOf<NovelEntity>()
     private val chapters = mutableStateListOf<ChapterEntity>() // overrides already applied
     private val arcs = mutableStateListOf<ArcEntity>()
     private val recentlyRead = mutableStateListOf<NovelEntity>()
+    private val overriddenChapterIds = mutableStateOf<Set<String>>(emptySet())
+    private val arcStartChapterIds = mutableStateOf<Set<String>>(emptySet())
     private val currentScreen = mutableStateOf<Screen>(Screen.Library)
     private val currentTheme = mutableStateOf(Theme.LIGHT)
     private lateinit var db: AppDatabase
@@ -70,10 +94,17 @@ class MainActivity : ComponentActivity() {
     }
 
     private suspend fun startScan(treeUri: Uri) {
-        scanner.scanRoot(treeUri) { novel ->
+        scanner.scanRoot(treeUri) { scanned ->
+            // scanRoot always builds a fresh NovelEntity with default field values (e.g.
+            // pageSize = 10). Upsert REPLACEs the whole row, so on rescan we'd silently
+            // wipe out anything the user has customized (like their pagination choice)
+            // unless we carry it over from the existing row first.
+            val existing = db.novelDao().findById(scanned.id)
+            val novel = if (existing != null) scanned.copy(pageSize = existing.pageSize) else scanned
             db.novelDao().upsert(novel)
             withContext(Dispatchers.Main) {
-                novels.add(novel)
+                val idx = novels.indexOfFirst { it.id == novel.id }
+                if (idx >= 0) novels[idx] = novel else novels.add(novel)
             }
             // After discovering a novel, scan its chapters and arcs
             val novelFolder = DocumentFile.fromTreeUri(this@MainActivity, treeUri)
@@ -90,7 +121,8 @@ class MainActivity : ComponentActivity() {
     // list rather than raw scan data.
     private suspend fun loadNovelDetails(novel: NovelEntity) {
         val raw = db.chapterDao().forNovel(novel.id)
-        val overridesByChapterId = db.chapterOverrideDao().forNovel(novel.id).associateBy { it.chapterId }
+        val overrides = db.chapterOverrideDao().forNovel(novel.id)
+        val overridesByChapterId = overrides.associateBy { it.chapterId }
         val rawIndexById = raw.withIndex().associate { (i, c) -> c.id to i }
 
         val effective = raw
@@ -104,13 +136,15 @@ class MainActivity : ComponentActivity() {
         chapters.addAll(effective)
         arcs.clear()
         arcs.addAll(db.arcDao().forNovel(novel.id))
+        overriddenChapterIds.value = overridesByChapterId.keys
+        arcStartChapterIds.value = overrides.filter { it.isArcStart }.map { it.chapterId }.toSet()
     }
 
     // Diffs the editor's edited chapter list against the raw scanned chapters and
     // persists per-chapter overrides only where something actually changed. If an edit
     // matches the scanned default again, any stale override for that chapter is removed
     // instead of being kept around with stale values.
-    private suspend fun saveChapterEdits(novel: NovelEntity, edited: List<ChapterEntity>) {
+    private suspend fun saveChapterEdits(novel: NovelEntity, edited: List<ChapterEntity>, arcStartIds: Set<String>) {
         val raw = db.chapterDao().forNovel(novel.id) // natural scan order, no overrides
         val rawById = raw.associateBy { it.id }
         val rawIndexById = raw.withIndex().associate { (i, c) -> c.id to i }
@@ -119,14 +153,16 @@ class MainActivity : ComponentActivity() {
             val original = rawById[chapter.id] ?: return@forEachIndexed
             val titleOverride = if (chapter.title != original.title) chapter.title else null
             val positionOverride = if (index != rawIndexById[chapter.id]) index else null
+            val isArcStart = chapter.id in arcStartIds
 
-            if (titleOverride != null || positionOverride != null) {
+            if (titleOverride != null || positionOverride != null || isArcStart) {
                 db.chapterOverrideDao().upsert(
                     ChapterOverrideEntity(
                         id = UUID.nameUUIDFromBytes("override:${chapter.id}".toByteArray()).toString(),
                         chapterId = chapter.id,
                         titleOverride = titleOverride,
-                        positionOverride = positionOverride
+                        positionOverride = positionOverride,
+                        isArcStart = isArcStart
                     )
                 )
             } else {
@@ -180,7 +216,7 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            MaterialTheme {
+            MaterialTheme(colorScheme = colorSchemeFor(currentTheme.value)) {
                 Column(modifier = Modifier.fillMaxSize()) {
                     val savedUri = prefsManager.libraryUri.collectAsState(initial = null)
 
@@ -208,6 +244,7 @@ class MainActivity : ComponentActivity() {
                                 novel = novel,
                                 chapters = chapters,
                                 arcs = arcs,
+                                overriddenChapterIds = overriddenChapterIds.value,
                                 onBack = { currentScreen.value = Screen.Library },
                                 onChapterSelected = { chapter ->
                                     lifecycleScope.launch {
@@ -242,8 +279,9 @@ class MainActivity : ComponentActivity() {
                             val novel = (currentScreen.value as Screen.ChapterEditor).novel
                             ChapterEditorScreen(
                                 chapters = chapters,
-                                onSave = { updatedChapters ->
-                                    saveChapterEdits(novel, updatedChapters)
+                                initialArcStartIds = arcStartChapterIds.value,
+                                onSave = { updatedChapters, arcStartIds ->
+                                    saveChapterEdits(novel, updatedChapters, arcStartIds)
                                 },
                                 onBack = { currentScreen.value = Screen.NovelDetail(novel) }
                             )

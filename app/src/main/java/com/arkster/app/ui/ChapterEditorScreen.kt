@@ -8,12 +8,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.TextField
@@ -32,15 +32,25 @@ import kotlinx.coroutines.launch
 @Composable
 fun ChapterEditorScreen(
     chapters: List<ChapterEntity>,
-    onSave: suspend (List<ChapterEntity>) -> Unit,
+    initialArcStartIds: Set<String> = emptySet(),
+    onSave: suspend (List<ChapterEntity>, Set<String>) -> Unit,
     onBack: () -> Unit
 ) {
     val editedChapters = remember { mutableStateOf(chapters) }
+    val arcStartIds = remember { mutableStateOf(initialArcStartIds) }
     val coroutineScope = rememberCoroutineScope()
 
     fun updateTitle(chapter: ChapterEntity, newTitle: String) {
         editedChapters.value = editedChapters.value.map {
             if (it.id == chapter.id) it.copy(title = newTitle) else it
+        }
+    }
+
+    fun toggleArcStart(chapter: ChapterEntity) {
+        arcStartIds.value = if (chapter.id in arcStartIds.value) {
+            arcStartIds.value - chapter.id
+        } else {
+            arcStartIds.value + chapter.id
         }
     }
 
@@ -93,6 +103,13 @@ fun ChapterEditorScreen(
                             }) {
                                 Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move down")
                             }
+
+                            FilterChip(
+                                selected = chapter.id in arcStartIds.value,
+                                onClick = { toggleArcStart(chapter) },
+                                label = { Text("Arc start") },
+                                modifier = Modifier.padding(start = 8.dp)
+                            )
                         }
                     }
                 }
@@ -102,7 +119,7 @@ fun ChapterEditorScreen(
         Button(
             onClick = {
                 coroutineScope.launch {
-                    onSave(editedChapters.value)
+                    onSave(editedChapters.value, arcStartIds.value)
                     onBack()
                 }
             },
