@@ -8,6 +8,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -22,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import com.arkster.app.ui.ChapterEditorScreen
@@ -242,10 +244,41 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        db = AppDatabase.create(this)
-        scanner = ScannerImpl(this)
-        prefsManager = PreferencesManager(this)
-        contentRepo = TextChapterContentRepository(this)
+
+        // AppDatabase.create() (and the other service objects below) are the very first
+        // things onCreate does, before setContent ever runs. Room.databaseBuilder(...).build()
+        // in particular locates its generated *_Impl class via reflection at *runtime*, not
+        // a compile-time link - a stale/corrupted incremental kapt cache (common after a CI
+        // rebuild) can compile clean and still throw the instant this line runs, taking the
+        // whole app down before a single frame is drawn - "installs fine, crashes on open,
+        // never even shows a screen". Wrapping this means a failure here shows an error
+        // screen with the real exception instead of a silent, undebuggable instant crash.
+        try {
+            db = AppDatabase.create(this)
+            scanner = ScannerImpl(this)
+            prefsManager = PreferencesManager(this)
+            contentRepo = TextChapterContentRepository(this)
+        } catch (e: Throwable) {
+            setContent {
+                MaterialTheme {
+                    androidx.compose.foundation.layout.Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(24.dp),
+                        verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center
+                    ) {
+                        Text("ARKster failed to start", style = MaterialTheme.typography.titleLarge)
+                        Text(
+                            (e::class.java.name + ": " + e.message) + "\n\n" +
+                                e.stackTrace.take(12).joinToString("\n") { "  at $it" },
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(top = 16.dp)
+                        )
+                    }
+                }
+            }
+            return
+        }
 
         // Restore saved library URI and auto-scan. This runs unattended on every launch
         // once a library has been picked once, before the user has touched anything -
