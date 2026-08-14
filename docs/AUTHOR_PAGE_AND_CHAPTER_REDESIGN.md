@@ -1,10 +1,11 @@
 # ARKster — Author Page & Chapter Page Redesign (staged plan)
 
 ## Status
-**Stage 3 — Chapter page (`ReaderScreen.kt`) redesign, in progress.** Stages
-1 (data layer) and 2 (`AuthorPageScreen.kt`) are complete. Stage 0's
-per-fiction `author.json` placement was superseded at Stage 1 kickoff by a
-root-level `authors/` folder (see "Where author.json lives" below).
+**Stage 4 — Navigation & wiring, complete.** Stages 1 (data layer), 2
+(`AuthorPageScreen.kt`), and 3 (`ReaderScreen.kt` chapter page redesign) are
+also complete. Stage 0's per-fiction `author.json` placement was superseded
+at Stage 1 kickoff by a root-level `authors/` folder (see "Where
+author.json lives" below).
 
 ## Motivation
 ARKster's whole pitch (see `README.md`) is making a folder of novels *feel*
@@ -224,6 +225,29 @@ below. No app code touched.
 - Add an `author/{...}` route to the nav graph in `MainActivity.kt`.
 - Wire tap targets from `NovelDetailScreen` (fiction page byline) and the
   Stage 3 "About the author" card's `onAuthorClick` into that route.
+
+**Implementation notes:**
+- The route is `Screen.Author(authorId: String, from: Screen)` rather than a
+  bare `object`/id-only route - it carries the screen it was entered from so
+  `onBack` returns to wherever the tap came from (fiction page or chapter
+  page) instead of always bouncing to Home, matching how every other screen
+  in this app already round-trips back to its actual caller.
+- `NovelDetailScreen`'s "by {author}" byline is only a tap target when
+  `novel.authorId != null` - a fiction with no resolved author link renders
+  the same plain, non-interactive text it always has (see Stage 3's "no
+  linked author -> no card" precedent).
+- `MainActivity` owns the author page's data the same way it already owns
+  `chapters`/`arcs` for `NovelDetailScreen`: `authorPageAuthor`/
+  `authorPageNovels` state, populated by a new `loadAuthorPage(authorId)`
+  (mirrors `loadNovelDetails`) triggered from a `LaunchedEffect(authorId)`
+  in the `Screen.Author` branch - not reloaded on unrelated recompositions.
+- `AuthorPageScreen`'s "Fictions" list is backed by `NovelDao.byAuthor`
+  (already existed from Stage 1), so it reflects every fiction currently
+  linked to that author, not just the one the user tapped in from.
+- If `authorId` doesn't resolve to a row in `authors` (author.json removed
+  from disk since the fiction/chapter page last read it), the screen simply
+  renders nothing rather than crashing - same "never fail on missing
+  optional metadata" guarantee as the rest of the app.
 
 ### Stage 5 — QA / polish
 Exercise the same edge cases `metadata.json` already has to handle:

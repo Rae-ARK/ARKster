@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import com.arkster.app.ui.ChapterEditorScreen
+import com.arkster.app.ui.AuthorPageScreen
 import com.arkster.app.ui.HomeScreen
 import com.arkster.app.ui.MetadataSearchDialog
 import com.arkster.app.ui.NovelDetailScreen
@@ -58,6 +59,10 @@ sealed class Screen {
     data class NovelDetail(val novel: NovelEntity) : Screen()
     data class Reader(val novelId: String, val chapter: ChapterEntity, val content: String) : Screen()
     data class ChapterEditor(val novel: NovelEntity) : Screen()
+    // Carries the previous screen so onBack can return to wherever the tap into the
+    // author page came from (fiction page byline or chapter page's "About the author"
+    // card) instead of always landing back on Home.
+    data class Author(val authorId: String, val from: Screen) : Screen()
     object Settings : Screen()
     object FictionBrowse : Screen()
 }
@@ -112,6 +117,10 @@ class MainActivity : ComponentActivity() {
     // fiction, only when a *different* fiction's reader is opened. Null covers both
     // "not resolved yet" and "this fiction has no linked author" (see NovelEntity.authorId).
     private val readerAuthor = mutableStateOf<AuthorEntity?>(null)
+    // Backs Screen.Author - reloaded via LaunchedEffect whenever the authorId changes,
+    // same "state lives in the Activity, screen just renders it" pattern as chapters/arcs.
+    private val authorPageAuthor = mutableStateOf<AuthorEntity?>(null)
+    private val authorPageNovels = mutableStateListOf<NovelEntity>()
     private val currentScreen = mutableStateOf<Screen>(Screen.Home)
     private val currentTheme = mutableStateOf(Theme.LIGHT)
     private val scanProgress = mutableStateOf<Pair<Int, Int>?>(null)  // (current, total) or null if not scanning
@@ -246,6 +255,17 @@ class MainActivity : ComponentActivity() {
         arcs.addAll(db.arcDao().forNovel(novel.id))
         overriddenChapterIds.value = overridesByChapterId.keys
         arcStartChapterIds.value = overrides.filter { it.isArcStart }.map { it.chapterId }.toSet()
+    }
+
+    // Loads the AuthorEntity + every novel linked to it (NovelDao.byAuthor) for
+    // Screen.Author. A missing/unknown authorId (author.json removed since the fiction
+    // page or reader last resolved it) just leaves authorPageAuthor null - AuthorPage's
+    // caller below treats that as "nothing to show" rather than crashing, same
+    // never-fail-on-missing-optional-metadata guarantee the rest of the app follows.
+    private suspend fun loadAuthorPage(authorId: String) {
+        authorPageAuthor.value = db.authorDao().findById(authorId)
+        authorPageNovels.clear()
+        authorPageNovels.addAll(db.novelDao().byAuthor(authorId))
     }
 
     // Diffs the editor's edited chapter list against the raw scanned chapters and
@@ -613,7 +633,13 @@ class MainActivity : ComponentActivity() {
                                     }
                                 },
                                 onEditClick = { currentScreen.value = Screen.ChapterEditor(novel) },
-                                onFetchInfoClick = { fetchMetadataFor(novel) }
+                                onFetchInfoClick = { fetchMetadataFor(novel) },
+                                onAuthorClick = {
+                                    val authorId = novel.authorId
+                                    if (authorId != null) {
+                                        currentScreen.value = Screen.Author(authorId, from = currentScreen.value)
+                                    }
+                                }
                             )
                         }
 
@@ -673,10 +699,13 @@ class MainActivity : ComponentActivity() {
                                             currentScreen.value = Screen.Reader(reader.novelId, next, chapterContent.body)
                                         }
                                     }
+                                },
+                                onAuthorClick = {
+                                    val authorId = readerAuthor.value?.id
+                                    if (authorId != null) {
+                                        currentScreen.value = Screen.Author(authorId, from = currentScreen.value)
+                                    }
                                 }
-                                // onAuthorClick intentionally left at its no-op default - wiring
-                                // it to the Stage 2 AuthorPageScreen is Stage 4's job (adding the
-                                // nav route), not this stage's.
                             )
                         }
 
@@ -690,6 +719,31 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onBack = { currentScreen.value = Screen.NovelDetail(novel) }
                             )
+                        }
+
+                        is Screen.Author -> {
+                            val screen = currentScreen.value as Screen.Author
+                            // Reload whenever the authorId changes (tapping into a
+                            // different author's page while one is already showing isn't
+                            // a real path today, but this keeps the screen correct if it
+                            // ever is) - not on every recomposition.
+                            LaunchedEffect(screen.authorId) {
+                                loadAuthorPage(screen.authorId)
+                            }
+                            val author = authorPageAuthor.value
+                            if (author != null) {
+                                AuthorPageScreen(
+                                    author = author,
+                                    novels = authorPageNovels,
+                                    onBack = { currentScreen.value = screen.from },
+                                    onNovelClick = { novel ->
+                                        lifecycleScope.launch {
+                                            loadNovelDetails(novel)
+                                            currentScreen.value = Screen.NovelDetail(novel)
+                                        }
+                                    }
+                                )
+                            }
                         }
 
                         is Screen.Settings -> {

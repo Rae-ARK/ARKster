@@ -68,7 +68,8 @@ fun NovelDetailScreen(
     onChapterSelected: (ChapterEntity) -> Unit,
     onResizePages: (Int) -> Unit = {},
     onEditClick: () -> Unit = {},
-    onFetchInfoClick: () -> Unit = {}
+    onFetchInfoClick: () -> Unit = {},
+    onAuthorClick: () -> Unit = {}
 ) {
     val selectedTabIndex = remember { mutableIntStateOf(0) }
     // Seeded from the novel's persisted page_size so the preference survives navigation
@@ -152,7 +153,17 @@ fun NovelDetailScreen(
                                 "by ${novel.author}",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 4.dp)
+                                modifier = Modifier
+                                    .padding(top = 4.dp)
+                                    // Only a real tap target when this fiction actually
+                                    // resolved to an author/<id>.json - otherwise there's
+                                    // nowhere for the tap to go (see
+                                    // AUTHOR_PAGE_AND_CHAPTER_REDESIGN.md's "no author
+                                    // link" fallback), same as the byline just being
+                                    // plain text today.
+                                    .let { base ->
+                                        if (novel.authorId != null) base.clickable { onAuthorClick() } else base
+                                    }
                             )
                         }
                         val statusLabel = when (novel.readingStatus) {
