@@ -316,6 +316,32 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // Shared fallback UI for anything that throws before/while the real screen renders.
+    // Pulled out so BOTH the service-construction guard below AND the setContent guard
+    // (see onCreate) can show the same "here's exactly what broke" screen instead of a
+    // silent process death - a stack trace on-screen beats needing adb/logcat to debug
+    // a phone-only crash report.
+    private fun renderCrashScreen(e: Throwable) {
+        setContent {
+            MaterialTheme {
+                androidx.compose.foundation.layout.Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(24.dp),
+                    verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center
+                ) {
+                    Text("ARKster failed to start", style = MaterialTheme.typography.titleLarge)
+                    Text(
+                        (e::class.java.name + ": " + e.message) + "\n\n" +
+                            e.stackTrace.take(12).joinToString("\n") { "  at $it" },
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 16.dp)
+                    )
+                }
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -333,24 +359,7 @@ class MainActivity : ComponentActivity() {
             prefsManager = PreferencesManager(this)
             contentRepo = TextChapterContentRepository(this)
         } catch (e: Throwable) {
-            setContent {
-                MaterialTheme {
-                    androidx.compose.foundation.layout.Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(24.dp),
-                        verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center
-                    ) {
-                        Text("ARKster failed to start", style = MaterialTheme.typography.titleLarge)
-                        Text(
-                            (e::class.java.name + ": " + e.message) + "\n\n" +
-                                e.stackTrace.take(12).joinToString("\n") { "  at $it" },
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.padding(top = 16.dp)
-                        )
-                    }
-                }
-            }
+            renderCrashScreen(e)
             return
         }
 
@@ -380,6 +389,23 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        // Everything from here down (status-bar theming, HomeScreen and its new
+        // empty-library state, etc.) is new UI code that runs on literally every cold
+        // launch, before the user touches anything - and unlike the service construction
+        // above, it was NOT guarded. The first composition pass of setContent() runs
+        // synchronously on this call stack, so any exception thrown while building this
+        // tree (a bad Icon reference, a null somewhere in HomeScreen, etc.) was previously
+        // propagating straight past this function and crashing the process outright, with
+        // no on-screen trace to debug from. Wrapping it surfaces the same diagnostic
+        // screen as the guard above instead of a silent crash.
+        try {
+            renderMainContent()
+        } catch (e: Throwable) {
+            renderCrashScreen(e)
+        }
+    }
+
+    private fun renderMainContent() {
         setContent {
             val colorScheme = colorSchemeFor(currentTheme.value)
             MaterialTheme(colorScheme = colorScheme) {
