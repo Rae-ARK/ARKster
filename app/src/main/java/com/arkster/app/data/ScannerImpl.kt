@@ -39,20 +39,46 @@ class ScannerImpl(private val context: Context) {
         onDiscovered: suspend (NovelEntity, DocumentFile) -> Unit,
         onProgress: suspend (current: Int, total: Int, message: String) -> Unit = { _, _, _ -> }
     ) = withContext(Dispatchers.IO) {
-        val root = DocumentFile.fromTreeUri(context, treeUri) ?: return@withContext
-        val children = root.listFiles()
-        val total = children.size
-        children.forEachIndexed { index, child ->
-            onProgress(index + 1, total, "Scanning ${child.name}...")
-            if (child.isDirectory) {
-                val title = child.name ?: "Unknown"
-                val id = UUID.nameUUIDFromBytes((treeUri.toString() + ":" + child.uri.toString()).toByteArray()).toString()
-                val coverUri = findCoverUri(child)
-                val novel = NovelEntity(id = id, title = title, author = null, coverUri = coverUri)
-                onDiscovered(novel, child)
+        // Everything below touches the Storage Access Framework, which throws
+        // SecurityException the moment a persisted grant is no longer valid (folder
+        // moved/deleted, permission revoked by the system, app data partially wiped,
+        // etc). This scan runs unattended on every app launch once a library has been
+        // picked once (see MainActivity's libraryUri.collect), so an uncaught exception
+        // here previously crashed the app on startup with no way to recover short of
+        // clearing app data. Fail soft instead: surface it as a status message and stop
+        // the scan for this call, rather than propagating and taking the whole app down.
+        try {
+            val root = DocumentFile.fromTreeUri(context, treeUri) ?: run {
+                onProgress(0, 0, "Library folder is no longer accessible")
+                return@withContext
             }
+            if (!root.canRead()) {
+                onProgress(0, 0, "Library folder permission was revoked")
+                return@withContext
+            }
+            val children = root.listFiles()
+            val total = children.size
+            children.forEachIndexed { index, child ->
+                onProgress(index + 1, total, "Scanning ${child.name}...")
+                if (child.isDirectory) {
+                    try {
+                        val title = child.name ?: "Unknown"
+                        val id = UUID.nameUUIDFromBytes((treeUri.toString() + ":" + child.uri.toString()).toByteArray()).toString()
+                        val coverUri = findCoverUri(child)
+                        val novel = NovelEntity(id = id, title = title, author = null, coverUri = coverUri)
+                        onDiscovered(novel, child)
+                    } catch (e: Exception) {
+                        // Don't let one bad/inaccessible novel folder abort the whole scan.
+                        onProgress(index + 1, total, "Skipped ${child.name}: ${e.message}")
+                    }
+                }
+            }
+            onProgress(total, total, "Scan complete")
+        } catch (e: SecurityException) {
+            onProgress(0, 0, "Lost access to the library folder - please reselect it")
+        } catch (e: Exception) {
+            onProgress(0, 0, "Scan failed: ${e.message}")
         }
-        onProgress(total, total, "Scan complete")
     }
 
     suspend fun scanChaptersForNovel(
@@ -61,6 +87,7 @@ class ScannerImpl(private val context: Context) {
         db: AppDatabase,
         onProgress: suspend (message: String) -> Unit = {}
     ) = withContext(Dispatchers.IO) {
+      try {
         onProgress("Checking fingerprint...")
         val fingerprint = computeFingerprint(novelFolder, novelId)
 
@@ -122,6 +149,13 @@ class ScannerImpl(private val context: Context) {
         // Save fingerprint
         onProgress("Saving fingerprint...")
         db.scanFingerprintDao().upsert(fingerprint)
+      } catch (e: SecurityException) {
+          // Permission to this novel's folder was revoked mid-scan - skip it instead of
+          // taking down the whole library scan (and the app) with it.
+          onProgress("Lost access to this novel's folder, skipping")
+      } catch (e: Exception) {
+          onProgress("Failed to scan this novel: ${e.message}")
+      }
     }
 
     private suspend fun parseChaptersInFolder(

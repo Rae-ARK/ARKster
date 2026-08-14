@@ -105,39 +105,58 @@ class MainActivity : ComponentActivity() {
     }
 
     private suspend fun startScan(treeUri: Uri) {
-        scanner.scanRoot(treeUri, 
-            onDiscovered = { scanned, novelFolder ->
-                // scanRoot always builds a fresh NovelEntity with default field values (e.g.
-                // pageSize = 10). Upsert REPLACEs the whole row, so on rescan we'd silently
-                // wipe out anything the user has customized (like their pagination choice)
-                // unless we carry it over from the existing row first.
-                val existing = db.novelDao().findById(scanned.id)
-                val novel = if (existing != null) scanned.copy(pageSize = existing.pageSize) else scanned
-                db.novelDao().upsert(novel)
-                withContext(Dispatchers.Main) {
-                    val idx = novels.indexOfFirst { it.id == novel.id }
-                    if (idx >= 0) novels[idx] = novel else novels.add(novel)
-                }
-                // Scan this novel's chapters/arcs using the folder scanRoot already
-                // resolved, instead of re-listing the root and searching by name again.
-                scanner.scanChaptersForNovel(novelFolder, novel.id, db) { message ->
+        // startScan runs unattended on every app launch once a library folder has been
+        // picked once (see the libraryUri.collect below), with no user interaction in
+        // between. ScannerImpl already fails soft on SAF errors (revoked permissions,
+        // deleted folders, etc), but this wraps the whole thing defensively too - a
+        // stray DB exception here should never be allowed to crash the app on startup;
+        // worst case the user sees a stale/partial library and can retry from Settings.
+        try {
+            scanner.scanRoot(treeUri,
+                onDiscovered = { scanned, novelFolder ->
+                    try {
+                        // scanRoot always builds a fresh NovelEntity with default field values
+                        // (e.g. pageSize = 10). Upsert REPLACEs the whole row, so on rescan
+                        // we'd silently wipe out anything the user has customized (like their
+                        // pagination choice) unless we carry it over from the existing row first.
+                        val existing = db.novelDao().findById(scanned.id)
+                        val novel = if (existing != null) scanned.copy(pageSize = existing.pageSize) else scanned
+                        db.novelDao().upsert(novel)
+                        withContext(Dispatchers.Main) {
+                            val idx = novels.indexOfFirst { it.id == novel.id }
+                            if (idx >= 0) novels[idx] = novel else novels.add(novel)
+                        }
+                        // Scan this novel's chapters/arcs using the folder scanRoot already
+                        // resolved, instead of re-listing the root and searching by name again.
+                        scanner.scanChaptersForNovel(novelFolder, novel.id, db) { message ->
+                            withContext(Dispatchers.Main) {
+                                scanMessage.value = "Scanning ${novel.title}: $message"
+                            }
+                        }
+                    } catch (e: Exception) {
+                        withContext(Dispatchers.Main) {
+                            scanMessage.value = "Skipped ${scanned.title}: ${e.message}"
+                        }
+                    }
+                },
+                onProgress = { current, total, message ->
                     withContext(Dispatchers.Main) {
-                        scanMessage.value = "Scanning ${novel.title}: $message"
+                        scanProgress.value = Pair(current, total)
+                        scanMessage.value = message
                     }
                 }
-            },
-            onProgress = { current, total, message ->
-                withContext(Dispatchers.Main) {
-                    scanProgress.value = Pair(current, total)
-                    scanMessage.value = message
-                }
+            )
+            refreshRecentlyRead()
+            withContext(Dispatchers.Main) {
+                scanProgress.value = null
+                scanMessage.value = ""
             }
-        )
-        withContext(Dispatchers.Main) {
-            scanProgress.value = null
-            scanMessage.value = ""
+        } catch (e: Exception) {
+            withContext(Dispatchers.Main) {
+                scanProgress.value = null
+                scanMessage.value = "Library scan failed: ${e.message}"
+            }
         }
-        refreshRecentlyRead()
     }
 
     // Loads the raw scanned chapters for a novel and applies any saved chapter_overrides
@@ -228,11 +247,21 @@ class MainActivity : ComponentActivity() {
         prefsManager = PreferencesManager(this)
         contentRepo = TextChapterContentRepository(this)
 
-        // Restore saved library URI and auto-scan
+        // Restore saved library URI and auto-scan. This runs unattended on every launch
+        // once a library has been picked once, before the user has touched anything -
+        // startScan() already fails soft internally, but this outer catch is the last
+        // line of defense so that literally nothing thrown on this path (a malformed
+        // saved URI via Uri.parse, an unexpected DB error, etc) can crash the app on
+        // startup. An uncaught exception here previously did exactly that.
         lifecycleScope.launch {
             prefsManager.libraryUri.collect { uri ->
                 if (uri != null && novels.isEmpty()) {
-                    startScan(Uri.parse(uri))
+                    try {
+                        startScan(Uri.parse(uri))
+                    } catch (e: Exception) {
+                        scanProgress.value = null
+                        scanMessage.value = "Couldn't load your library: ${e.message}"
+                    }
                 }
             }
         }
