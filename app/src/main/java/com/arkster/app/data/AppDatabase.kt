@@ -10,16 +10,18 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 @Database(
     entities = [
         NovelEntity::class,
+        AuthorEntity::class,
         ArcEntity::class,
         ChapterEntity::class,
         ChapterOverrideEntity::class,
         ScanFingerprintEntity::class,
         ReadingProgressEntity::class
     ],
-    version = 6
+    version = 7
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun novelDao(): NovelDao
+    abstract fun authorDao(): AuthorDao
     abstract fun arcDao(): ArcDao
     abstract fun chapterDao(): ChapterDao
     abstract fun chapterOverrideDao(): ChapterOverrideDao
@@ -125,11 +127,41 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // Migration from v6 to v7: add the `authors` table (see AuthorEntity /
+        // AUTHOR_PAGE_AND_CHAPTER_REDESIGN.md Stage 1) and a plain, unenforced
+        // `author_id` column on novels pointing at it. No FK constraint is declared
+        // here - SQLite's ALTER TABLE can't retroactively attach one to an existing
+        // table, so NovelEntity.authorId deliberately isn't annotated with
+        // @ForeignKey either; the link is resolved in application code (ScannerImpl,
+        // NovelDao.byAuthor) instead of at the DB layer.
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("""
+                    CREATE TABLE IF NOT EXISTS authors (
+                        id TEXT PRIMARY KEY NOT NULL,
+                        name TEXT NOT NULL,
+                        avatar_uri TEXT,
+                        bio TEXT,
+                        joined TEXT,
+                        location TEXT,
+                        gender TEXT,
+                        links_json TEXT,
+                        followers INTEGER,
+                        favorites INTEGER,
+                        reviews_received INTEGER,
+                        ratings_received INTEGER,
+                        source_path TEXT NOT NULL
+                    )
+                """.trimIndent())
+                database.execSQL("ALTER TABLE novels ADD COLUMN author_id TEXT")
+            }
+        }
+
         fun create(context: Context): AppDatabase = Room.databaseBuilder(
             context.applicationContext,
             AppDatabase::class.java,
             "arkster.db"
-        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
             .fallbackToDestructiveMigration()
             .build()
     }

@@ -14,6 +14,15 @@ data class NovelEntity(
     @PrimaryKey val id: String,
     @ColumnInfo val title: String,
     @ColumnInfo val author: String?,
+    // Resolved by ScannerImpl against the root-level authors/ folder (see
+    // ScannerImpl.scanAuthorsFolder and AUTHOR_PAGE_AND_CHAPTER_REDESIGN.md) - either
+    // this fiction's metadata.json "authorId" matched against an authors/<id>.json, or
+    // a case-insensitive fallback match of `author` against an author's name. Null
+    // when neither resolves, same as `author` itself being null. Deliberately NOT a
+    // Room @ForeignKey: this column is added to an already-existing table via ALTER
+    // TABLE in MIGRATION_6_7, and SQLite can't attach an enforced FK constraint that
+    // way, so it stays a plain soft reference resolved in application code instead.
+    @ColumnInfo(name = "author_id") val authorId: String? = null,
     @ColumnInfo(name = "cover_uri") val coverUri: String?,
     @ColumnInfo(name = "page_size") val pageSize: Int = 10,  // per-fiction pagination default
     @ColumnInfo(name = "reading_status") val readingStatus: String = NovelStatus.NOT_STARTED.name,  // NOT_STARTED, IN_PROGRESS, COMPLETED
@@ -26,6 +35,40 @@ data class NovelEntity(
     @ColumnInfo(name = "published_date") val publishedDate: String? = null,
     @ColumnInfo(name = "external_source_url") val externalSourceUrl: String? = null,
     @ColumnInfo(name = "metadata_fetched_at") val metadataFetchedAt: Long? = null  // null = never fetched
+)
+
+// One row per authors/<id>.json file at the library root (see
+// ScannerImpl.scanAuthorsFolder). `id` is the filename by default, or the json's own
+// "id" override - never hand-validated for uniqueness, since a filename is already
+// unique within the authors/ folder by construction; an override collision is instead
+// resolved by "first file seen this scan wins" (see scanAuthorsFolder). Refreshed
+// wholesale on every full library rescan the same way `arcs` are diffed against their
+// novel, rather than being tied to any single novel itself - one author can be linked
+// from many NovelEntity rows via NovelEntity.authorId.
+@Entity(tableName = "authors")
+data class AuthorEntity(
+    @PrimaryKey val id: String,
+    @ColumnInfo val name: String,
+    @ColumnInfo(name = "avatar_uri") val avatarUri: String? = null,
+    @ColumnInfo val bio: String? = null,
+    @ColumnInfo val joined: String? = null,
+    @ColumnInfo val location: String? = null,
+    @ColumnInfo val gender: String? = null,
+    // Raw JSON object string (e.g. {"twitter":"...","website":"..."}) - simple enough
+    // not to need a TypeConverter/child table, same rationale as NovelEntity.genres
+    // being a flat comma-separated string. Parsed back to a Map in the UI layer.
+    @ColumnInfo(name = "links_json") val linksJson: String? = null,
+    // Manually-authored, display-only numbers (see schema notes in the redesign doc) -
+    // not a real follower/review system, purely for visual parity with Royal Road's
+    // profile stat strip.
+    @ColumnInfo val followers: Int? = null,
+    @ColumnInfo val favorites: Int? = null,
+    @ColumnInfo(name = "reviews_received") val reviewsReceived: Int? = null,
+    @ColumnInfo(name = "ratings_received") val ratingsReceived: Int? = null,
+    // authors/<file>.json URI this row was parsed from, kept for parity with
+    // ScanFingerprintEntity.folderUri-style provenance and possible future debugging;
+    // not currently read back by anything.
+    @ColumnInfo(name = "source_path") val sourcePath: String
 )
 
 @Entity(tableName = "arcs",

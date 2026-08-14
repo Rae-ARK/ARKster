@@ -158,6 +158,7 @@ class MainActivity : ComponentActivity() {
                                 pageSize = existing.pageSize,
                                 readingStatus = existing.readingStatus,
                                 author = scanned.author ?: existing.author,
+                                authorId = scanned.authorId ?: existing.authorId,
                                 description = if (remoteFetched) existing.description else (scanned.description ?: existing.description),
                                 genres = if (remoteFetched) existing.genres else (scanned.genres ?: existing.genres),
                                 remoteCoverUrl = existing.remoteCoverUrl,
@@ -182,6 +183,17 @@ class MainActivity : ComponentActivity() {
                         withContext(Dispatchers.Main) {
                             scanMessage.value = "Skipped ${scanned.title}: ${e.message}"
                         }
+                    }
+                },
+                onAuthorsDiscovered = { discoveredAuthors ->
+                    // Same diff-and-remove pattern scanChaptersForNovel already uses for
+                    // arcs: upsert everything this scan found under authors/, then drop
+                    // any previously-known author row that scan didn't see this time
+                    // (its authors/<id>.json was deleted or renamed).
+                    val seenIds = discoveredAuthors.map { it.id }.toSet()
+                    discoveredAuthors.forEach { db.authorDao().upsert(it) }
+                    db.authorDao().all().filter { it.id !in seenIds }.forEach { stale ->
+                        db.authorDao().delete(stale.id)
                     }
                 },
                 onProgress = { current, total, message ->

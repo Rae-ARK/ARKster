@@ -38,6 +38,11 @@ class ScannerImpl(private val context: Context) {
         // novel, making a full scan O(n^2) in the number of novels, and was fragile if
         // a folder happened to share a name with another entry.
         onDiscovered: suspend (NovelEntity, DocumentFile) -> Unit,
+        // Fired exactly once per scanRoot call, after the root-level authors/ folder
+        // (if any) has been parsed and before novel folders are iterated - callers do
+        // the actual DB upsert/stale-removal themselves, same "ScannerImpl never holds
+        // a db reference in scanRoot" style already used for onDiscovered above.
+        onAuthorsDiscovered: suspend (List<AuthorEntity>) -> Unit = {},
         onProgress: suspend (current: Int, total: Int, message: String) -> Unit = { _, _, _ -> }
     ) = withContext(Dispatchers.IO) {
         // Everything below touches the Storage Access Framework, which throws
@@ -57,7 +62,27 @@ class ScannerImpl(private val context: Context) {
                 onProgress(0, 0, "Library folder permission was revoked")
                 return@withContext
             }
+            // Root-level authors/ folder, parsed once per scan (not per-novel) - see
+            // scanAuthorsFolder for the id-collision/fail-soft rules. Built before the
+            // novel loop below so each novel's metadata.json can be resolved against it.
+            val authorsFolder = findAuthorsFolder(root)
+            val discoveredAuthors = if (authorsFolder != null) {
+                scanAuthorsFolder(authorsFolder) { message ->
+                    onProgress(0, 0, message)
+                }
+            } else emptyList()
+            onAuthorsDiscovered(discoveredAuthors)
+            val authorsById = discoveredAuthors.associateBy { it.id }
+            // Fallback lookup for fictions that set a free-text `author` but no
+            // `authorId` - first author with a given normalized name wins ties, same as
+            // the id-collision rule in scanAuthorsFolder.
+            val authorIdByNormalizedName = mutableMapOf<String, String>()
+            discoveredAuthors.forEach { authorIdByNormalizedName.putIfAbsent(it.name.trim().lowercase(), it.id) }
+
             val children = root.listFiles()
+                // The authors/ folder holds author profiles, not a fiction - never treat
+                // it as a novel folder even though it lives at the same level.
+                .filterNot { it.isDirectory && it.name?.equals("authors", ignoreCase = true) == true }
             val total = children.size
             children.forEachIndexed { index, child ->
                 onProgress(index + 1, total, "Scanning ${child.name}...")
@@ -72,10 +97,18 @@ class ScannerImpl(private val context: Context) {
                         // by hand (or via a script) without needing the "Fetch info" lookup,
                         // which only searches Google Books and mostly won't have web novels.
                         val localMetadata = readLocalMetadata(child)
+                        // Resolution order (see "Linking a fiction to an author" in
+                        // AUTHOR_PAGE_AND_CHAPTER_REDESIGN.md): explicit authorId first, then a
+                        // case-insensitive name fallback, then no link at all.
+                        val resolvedAuthorId = localMetadata?.authorId
+                            ?.trim()?.lowercase()
+                            ?.takeIf { authorsById.containsKey(it) }
+                            ?: localMetadata?.author?.let { authorIdByNormalizedName[it.trim().lowercase()] }
                         val novel = NovelEntity(
                             id = id,
                             title = localMetadata?.title?.takeIf { it.isNotBlank() } ?: title,
                             author = localMetadata?.author,
+                            authorId = resolvedAuthorId,
                             coverUri = coverUri,
                             description = localMetadata?.description,
                             genres = localMetadata?.genres,
@@ -272,6 +305,7 @@ class ScannerImpl(private val context: Context) {
     private data class LocalMetadata(
         val title: String?,
         val author: String?,
+        val authorId: String?,
         val description: String?,
         val genres: String?,
         val publishedDate: String?
@@ -281,6 +315,7 @@ class ScannerImpl(private val context: Context) {
     // {
     //   "title": "Summoned By Mistake, I Decided To Learn How To Live",
     //   "author": "Some Author",
+    //   "authorId": "rae-ark",
     //   "description": "A short synopsis...",
     //   "genres": ["Fantasy", "Isekai"],
     //   "publishedDate": "2023"
@@ -289,6 +324,8 @@ class ScannerImpl(private val context: Context) {
     // file just means no local metadata, never a scan failure (this is loaded once per
     // novel on every scan, so a bad file simply doesn't override anything that scan).
     // "genres" accepts either a JSON array of strings or a single comma-separated string.
+    // "authorId" links this fiction to authors/<authorId>.json - see
+    // AUTHOR_PAGE_AND_CHAPTER_REDESIGN.md's "Linking a fiction to an author".
     private fun readLocalMetadata(folder: DocumentFile): LocalMetadata? {
         val file = folder.listFiles().firstOrNull {
             it.isFile && it.name?.equals("metadata.json", ignoreCase = true) == true
@@ -307,6 +344,7 @@ class ScannerImpl(private val context: Context) {
             LocalMetadata(
                 title = json.optString("title").takeIf { it.isNotBlank() },
                 author = json.optString("author").takeIf { it.isNotBlank() },
+                authorId = json.optString("authorId").takeIf { it.isNotBlank() },
                 description = json.optString("description").takeIf { it.isNotBlank() },
                 genres = genres,
                 publishedDate = json.optString("publishedDate").takeIf { it.isNotBlank() }
@@ -317,5 +355,118 @@ class ScannerImpl(private val context: Context) {
             // as if the file weren't there.
             null
         }
+    }
+
+    private data class AuthorMetadata(
+        val id: String?,
+        val name: String?,
+        val avatar: String?,
+        val bio: String?,
+        val joined: String?,
+        val location: String?,
+        val gender: String?,
+        val linksJson: String?,
+        val followers: Int?,
+        val favorites: Int?,
+        val reviewsReceived: Int?,
+        val ratingsReceived: Int?
+    )
+
+    private fun findAuthorsFolder(root: DocumentFile): DocumentFile? =
+        root.listFiles().firstOrNull { it.isDirectory && it.name?.equals("authors", ignoreCase = true) == true }
+
+    // Resolves an author.json "avatar" filename against the authors/ folder, the same
+    // way findCoverUri resolves cover.* against a novel folder.
+    private fun resolveAuthorAvatarUri(authorsFolder: DocumentFile, avatarFilename: String): String? =
+        authorsFolder.listFiles().firstOrNull {
+            it.isFile && it.name?.equals(avatarFilename, ignoreCase = true) == true
+        }?.uri?.toString()
+
+    // Reads and parses one authors/<id>.json file. See "authors/<id>.json schema" in
+    // AUTHOR_PAGE_AND_CHAPTER_REDESIGN.md for the full field list. All fields optional;
+    // malformed JSON just means this file contributes nothing (fail soft, same
+    // philosophy as readLocalMetadata above) - it's up to the caller
+    // (scanAuthorsFolder) to still fall back to the filename for the id/name in that case.
+    private fun readAuthorMetadata(file: DocumentFile): AuthorMetadata? {
+        return try {
+            val text = context.contentResolver.openInputStream(file.uri)
+                ?.bufferedReader()
+                ?.use { it.readText() } ?: return null
+            val json = JSONObject(text)
+            val links = json.optJSONObject("links")
+            val stats = json.optJSONObject("stats")
+            AuthorMetadata(
+                id = json.optString("id").takeIf { it.isNotBlank() },
+                name = json.optString("name").takeIf { it.isNotBlank() },
+                avatar = json.optString("avatar").takeIf { it.isNotBlank() },
+                bio = json.optString("bio").takeIf { it.isNotBlank() },
+                joined = json.optString("joined").takeIf { it.isNotBlank() },
+                location = json.optString("location").takeIf { it.isNotBlank() },
+                gender = json.optString("gender").takeIf { it.isNotBlank() },
+                linksJson = links?.toString(),
+                followers = stats?.takeIf { it.has("followers") }?.optInt("followers"),
+                favorites = stats?.takeIf { it.has("favorites") }?.optInt("favorites"),
+                reviewsReceived = stats?.takeIf { it.has("reviews_received") }?.optInt("reviews_received"),
+                ratingsReceived = stats?.takeIf { it.has("ratings_received") }?.optInt("ratings_received")
+            )
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    // Parses every authors/<id>.json file in the given authors/ folder into an
+    // AuthorEntity. The filename (minus extension) is the id unless the json's own
+    // "id" field overrides it. Ids are never hand-validated for global uniqueness -
+    // filenames are already unique within a folder by construction, so the only
+    // possible collision is two files whose "id" override happens to match; when that
+    // happens the file seen first (folder listing order) wins and the later one is
+    // skipped with a soft warning via onProgress, same fail-soft philosophy as every
+    // other malformed/ambiguous input this scanner already tolerates - never a thrown
+    // error, never an aborted scan.
+    private suspend fun scanAuthorsFolder(
+        authorsFolder: DocumentFile,
+        onProgress: suspend (message: String) -> Unit
+    ): List<AuthorEntity> {
+        val files = authorsFolder.listFiles().filter {
+            it.isFile && it.name?.endsWith(".json", ignoreCase = true) == true
+        }
+        val result = mutableListOf<AuthorEntity>()
+        val seenIds = mutableSetOf<String>()
+        for (file in files) {
+            val filenameId = file.name?.let {
+                it.substring(0, it.length - ".json".length).trim().lowercase()
+            }
+            val parsed = readAuthorMetadata(file)
+            val id = parsed?.id?.trim()?.lowercase()?.takeIf { it.isNotBlank() } ?: filenameId
+            if (id.isNullOrBlank()) continue
+            if (!seenIds.add(id)) {
+                // Collision on an explicit "id" override (or, theoretically, two files
+                // differing only by case) - keep the first one seen, skip this one, and
+                // surface it the same soft-warning way every other scan issue already is.
+                onProgress("Skipped ${file.name}: author id \"$id\" is already used by another file in authors/")
+                continue
+            }
+            val name = parsed?.name?.takeIf { it.isNotBlank() }
+                ?: file.name?.let { it.substring(0, it.length - 5) }
+                ?: id
+            result.add(
+                AuthorEntity(
+                    id = id,
+                    name = name,
+                    avatarUri = parsed?.avatar?.let { resolveAuthorAvatarUri(authorsFolder, it) },
+                    bio = parsed?.bio,
+                    joined = parsed?.joined,
+                    location = parsed?.location,
+                    gender = parsed?.gender,
+                    linksJson = parsed?.linksJson,
+                    followers = parsed?.followers,
+                    favorites = parsed?.favorites,
+                    reviewsReceived = parsed?.reviewsReceived,
+                    ratingsReceived = parsed?.ratingsReceived,
+                    sourcePath = file.uri.toString()
+                )
+            )
+        }
+        return result
     }
 }

@@ -25,6 +25,10 @@ interface NovelDao {
     @Query("SELECT * FROM novels WHERE reading_status = :status ORDER BY title")
     suspend fun byStatus(status: String): List<NovelEntity>
 
+    // Backs the Stage 2 author page's fiction list.
+    @Query("SELECT * FROM novels WHERE author_id = :authorId ORDER BY title")
+    suspend fun byAuthor(authorId: String): List<NovelEntity>
+
     // Writes a confirmed metadata match (see NovelMetadataProvider) onto an existing
     // novel row. A plain UPDATE rather than upsert, since we're patching fields on a
     // row that must already exist - upserting a partial entity here would null out
@@ -48,6 +52,21 @@ interface NovelDao {
         externalSourceUrl: String?,
         fetchedAt: Long
     )
+}
+
+@Dao
+interface AuthorDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(author: AuthorEntity)
+
+    @Query("SELECT * FROM authors ORDER BY name")
+    suspend fun all(): List<AuthorEntity>
+
+    @Query("SELECT * FROM authors WHERE id = :authorId")
+    suspend fun findById(authorId: String): AuthorEntity?
+
+    @Query("DELETE FROM authors WHERE id = :authorId")
+    suspend fun delete(authorId: String)
 }
 
 @Dao
