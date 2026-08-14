@@ -34,6 +34,7 @@ Push to `main` or `develop` branches to trigger automatic APK builds. Artifacts 
 - [v0.1 MVP app README](app/README.md) — feature summary and build notes
 - [v0.2 Roadmap](docs/V0.2_ROADMAP.md) — arcs, pagination prefs, manual edits, incremental rescan
 - [Scanner POC notes](spec/SCANNER_POC.md) — heuristics and progressive scan UX
+- [Author page & chapter page redesign (staged plan)](docs/AUTHOR_PAGE_AND_CHAPTER_REDESIGN.md) — `author.json` contract and Stage 0-5 rollout; Stage 0 (docs) only so far
 
 ## Architecture highlights
 - **Room + DataStore**: Indexed library state + lightweight prefs.
