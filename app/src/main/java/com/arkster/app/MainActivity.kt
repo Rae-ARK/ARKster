@@ -35,6 +35,7 @@ import com.arkster.app.ui.SettingsScreen
 import com.arkster.app.ui.FictionBrowseScreen
 import com.arkster.app.data.AppDatabase
 import com.arkster.app.data.ArcEntity
+import com.arkster.app.data.AuthorEntity
 import com.arkster.app.data.ChapterOverrideEntity
 import com.arkster.app.data.GoogleBooksMetadataProvider
 import com.arkster.app.data.NovelMetadataCandidate
@@ -104,6 +105,12 @@ class MainActivity : ComponentActivity() {
     private val inProgressNovels = mutableStateListOf<NovelEntity>()
     private val overriddenChapterIds = mutableStateOf<Set<String>>(emptySet())
     private val arcStartChapterIds = mutableStateOf<Set<String>>(emptySet())
+    // Author of the fiction currently open in the reader, resolved once when entering
+    // Screen.Reader (see the two entry points below) rather than looked up reactively
+    // per-recomposition - it doesn't change across a Previous/Next hop within the same
+    // fiction, only when a *different* fiction's reader is opened. Null covers both
+    // "not resolved yet" and "this fiction has no linked author" (see NovelEntity.authorId).
+    private val readerAuthor = mutableStateOf<AuthorEntity?>(null)
     private val currentScreen = mutableStateOf<Screen>(Screen.Home)
     private val currentTheme = mutableStateOf(Theme.LIGHT)
     private val scanProgress = mutableStateOf<Pair<Int, Int>?>(null)  // (current, total) or null if not scanning
@@ -524,6 +531,16 @@ class MainActivity : ComponentActivity() {
                                         if (lastProgress != null) {
                                             val chapter = db.chapterDao().findById(lastProgress.chapterId)
                                             if (chapter != null) {
+                                                // "Continue Reading" used to jump straight into
+                                                // Screen.Reader without ever calling
+                                                // loadNovelDetails(), unlike every other path into
+                                                // the reader - so `chapters`/`arcs` could still hold
+                                                // a *different* novel's data (or be empty) here.
+                                                // That was harmless before Stage 3, since ReaderScreen
+                                                // didn't read them; now Previous/Next need the
+                                                // correctly-scoped chapter list to compute neighbors.
+                                                loadNovelDetails(novel)
+                                                readerAuthor.value = novel.authorId?.let { db.authorDao().findById(it) }
                                                 val chapterContent = contentRepo.getTextContent(chapter.sourcePath)
                                                 currentScreen.value = Screen.Reader(novel.id, chapter, chapterContent.body)
                                             }
@@ -570,6 +587,7 @@ class MainActivity : ComponentActivity() {
                                         // Mark novel as IN_PROGRESS when starting to read
                                         db.novelDao().updateReadingStatus(novel.id, NovelStatus.IN_PROGRESS.name)
                                         refreshRecentlyRead()
+                                        readerAuthor.value = novel.authorId?.let { db.authorDao().findById(it) }
                                         val chapterContent = contentRepo.getTextContent(chapter.sourcePath)
                                         currentScreen.value = Screen.Reader(novel.id, chapter, chapterContent.body)
                                     }
@@ -586,16 +604,57 @@ class MainActivity : ComponentActivity() {
 
                         is Screen.Reader -> {
                             val reader = currentScreen.value as Screen.Reader
+                            // `chapters`/`arcs` are scoped to whichever novel was last loaded via
+                            // loadNovelDetails() - both paths that create Screen.Reader now call
+                            // it first (see onContinueReading/onChapterSelected above), so this is
+                            // safe to read directly rather than re-querying the DB here.
+                            val novel = novels.firstOrNull { it.id == reader.novelId }
+                            val currentIndex = chapters.indexOfFirst { it.id == reader.chapter.id }
+                            val previousChapter = chapters.getOrNull(currentIndex - 1).takeIf { currentIndex > 0 }
+                            val nextChapter = chapters.getOrNull(currentIndex + 1).takeIf { currentIndex >= 0 }
+                            val arcTitle = reader.chapter.arcId?.let { arcId -> arcs.firstOrNull { it.id == arcId }?.name }
                             ReaderScreen(
                                 chapter = reader.chapter,
                                 content = reader.content,
                                 appTheme = currentTheme.value,
+                                novelTitle = novel?.title,
+                                arcTitle = arcTitle,
+                                author = readerAuthor.value,
                                 onBack = { progress ->
                                     lifecycleScope.launch {
                                         saveReadingProgress(reader.novelId, reader.chapter.id, progress)
                                         currentScreen.value = Screen.Home
                                     }
+                                },
+                                onBackToFiction = { progress ->
+                                    if (novel != null) {
+                                        lifecycleScope.launch {
+                                            saveReadingProgress(reader.novelId, reader.chapter.id, progress)
+                                            currentScreen.value = Screen.NovelDetail(novel)
+                                        }
+                                    }
+                                },
+                                onPrevious = previousChapter?.let { prev ->
+                                    { progress: Float ->
+                                        lifecycleScope.launch {
+                                            saveReadingProgress(reader.novelId, reader.chapter.id, progress)
+                                            val chapterContent = contentRepo.getTextContent(prev.sourcePath)
+                                            currentScreen.value = Screen.Reader(reader.novelId, prev, chapterContent.body)
+                                        }
+                                    }
+                                },
+                                onNext = nextChapter?.let { next ->
+                                    { progress: Float ->
+                                        lifecycleScope.launch {
+                                            saveReadingProgress(reader.novelId, reader.chapter.id, progress)
+                                            val chapterContent = contentRepo.getTextContent(next.sourcePath)
+                                            currentScreen.value = Screen.Reader(reader.novelId, next, chapterContent.body)
+                                        }
+                                    }
                                 }
+                                // onAuthorClick intentionally left at its no-op default - wiring
+                                // it to the Stage 2 AuthorPageScreen is Stage 4's job (adding the
+                                // nav route), not this stage's.
                             )
                         }
 

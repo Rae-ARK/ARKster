@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
@@ -21,10 +22,13 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Brightness4
 import androidx.compose.material.icons.filled.Brightness7
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -35,13 +39,18 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import com.arkster.app.data.AuthorEntity
 import com.arkster.app.data.ChapterEntity
 import com.arkster.app.data.Theme
 
@@ -67,7 +76,31 @@ fun ReaderScreen(
     chapter: ChapterEntity,
     content: String,
     appTheme: Theme = Theme.LIGHT,
-    onBack: (Float) -> Unit
+    // Everything below is new for the Stage 3 chapter-page redesign. All optional/
+    // no-op by default so this stays source-compatible with any other call site.
+    // novelTitle/arcTitle are plain strings (not NovelEntity/ArcEntity) so ReaderScreen
+    // stays decoupled from the data layer beyond the ChapterEntity it already took.
+    novelTitle: String? = null,
+    arcTitle: String? = null,
+    // Sourced from the same author.json-backed AuthorEntity the Stage 2 AuthorPageScreen
+    // reads - see AUTHOR_PAGE_AND_CHAPTER_REDESIGN.md's Stage 3 section. Null renders no
+    // "About the author" card at all, same as a fiction with no linked author today.
+    author: AuthorEntity? = null,
+    onBack: (Float) -> Unit,
+    // Distinct from onBack: onBack is the existing top-app-bar arrow (goes to whatever
+    // the caller currently sends it, e.g. Home); onBackToFiction is the new Royal
+    // Road-style breadcrumb link that always means "this fiction's detail page". Kept
+    // separate rather than repurposing onBack so this stage doesn't silently change the
+    // existing top-bar arrow's behavior. Same (Float) -> Unit shape as onBack so this
+    // exit path saves reading progress too, instead of silently dropping it.
+    onBackToFiction: (Float) -> Unit = {},
+    // Null (not just "does nothing when clicked") means "there is no previous/next
+    // chapter" - the caller passes null at the first/last chapter so the buttons render
+    // disabled instead of merely inert. Takes the same (Float) -> Unit progress-on-exit
+    // shape as onBack so navigating via Previous/Next still saves reading progress.
+    onPrevious: ((Float) -> Unit)? = null,
+    onNext: ((Float) -> Unit)? = null,
+    onAuthorClick: () -> Unit = {}
 ) {
     val fontSize = remember { mutableFloatStateOf(18f) }
     val lineHeight = remember { mutableFloatStateOf(1.8f) }
@@ -115,6 +148,45 @@ fun ReaderScreen(
                     interactionSource = remember { MutableInteractionSource() }
                 ) { showControls.value = !showControls.value }
         ) {
+            // Fiction title / "back to fiction" breadcrumb + arc name, matching Royal
+            // Road's chapter-page top block. Only rendered when the caller has a title to
+            // show - existing callers that don't pass novelTitle see no change at all.
+            if (novelTitle != null) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.clickable { onBackToFiction(currentProgress()) },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Filled.ArrowBack,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            novelTitle,
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(start = 4.dp)
+                        )
+                    }
+                    if (!arcTitle.isNullOrBlank()) {
+                        Text(
+                            arcTitle,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = textColor.copy(alpha = 0.7f),
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                }
+            }
+
             // Chapter title
             Text(
                 chapter.title,
@@ -124,6 +196,16 @@ fun ReaderScreen(
                     .padding(24.dp),
                 textAlign = TextAlign.Center,
                 color = textColor
+            )
+
+            // Previous/Next above the chapter body, mirroring the row below it - Royal
+            // Road shows this pair on both ends of the chapter.
+            ChapterNavRow(
+                hasPrevious = onPrevious != null,
+                hasNext = onNext != null,
+                textColor = textColor,
+                onPrevious = { onPrevious?.invoke(currentProgress()) },
+                onNext = { onNext?.invoke(currentProgress()) }
             )
 
             // Chapter content with enhanced typography
@@ -144,6 +226,27 @@ fun ReaderScreen(
                         textAlign = TextAlign.Justify
                     ),
                     modifier = Modifier.padding(20.dp)
+                )
+            }
+
+            ChapterNavRow(
+                hasPrevious = onPrevious != null,
+                hasNext = onNext != null,
+                textColor = textColor,
+                onPrevious = { onPrevious?.invoke(currentProgress()) },
+                onNext = { onNext?.invoke(currentProgress()) }
+            )
+
+            // "About the author" card - only rendered when this fiction actually has a
+            // linked author (see NovelEntity.authorId / AUTHOR_PAGE_AND_CHAPTER_REDESIGN.md).
+            // No author.json means no card, same as today's "no metadata.json" behavior
+            // elsewhere in the scanner.
+            if (author != null) {
+                AboutAuthorCard(
+                    author = author,
+                    backgroundColor = backgroundColor,
+                    textColor = textColor,
+                    onClick = onAuthorClick
                 )
             }
 
@@ -297,6 +400,109 @@ fun ReaderScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+// Previous/Next row shown both above and below the chapter body (see Stage 3 in
+// AUTHOR_PAGE_AND_CHAPTER_REDESIGN.md). A missing neighbor renders its button disabled
+// rather than hiding it, so the layout doesn't jump between the top and bottom copies
+// of this row depending on which end of the chapter list you're at.
+@Composable
+private fun ChapterNavRow(
+    hasPrevious: Boolean,
+    hasNext: Boolean,
+    textColor: Color,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        OutlinedButton(onClick = onPrevious, enabled = hasPrevious) {
+            Text("‹ Previous Chapter")
+        }
+        OutlinedButton(onClick = onNext, enabled = hasNext) {
+            Text("Next Chapter ›")
+        }
+    }
+}
+
+// Truncation point for the bio excerpt shown here, vs the full bio the Stage 2
+// AuthorPageScreen shows - matches the doc's "shown both truncated (chapter card) and
+// in full (author page)" note on author.json's bio field.
+private const val BIO_EXCERPT_LENGTH = 160
+
+@Composable
+private fun AboutAuthorCard(
+    author: AuthorEntity,
+    backgroundColor: Color,
+    textColor: Color,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 12.dp)
+            .clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(containerColor = backgroundColor)
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            ReaderAuthorAvatar(avatarUrl = author.avatarUri, modifier = Modifier.size(48.dp))
+            Column(modifier = Modifier.padding(start = 12.dp)) {
+                Text(
+                    "About the Author",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = textColor.copy(alpha = 0.6f)
+                )
+                Text(
+                    author.name,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = textColor,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+                if (!author.bio.isNullOrBlank()) {
+                    Text(
+                        author.bio.take(BIO_EXCERPT_LENGTH).let {
+                            if (author.bio.length > BIO_EXCERPT_LENGTH) "$it…" else it
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = textColor.copy(alpha = 0.85f),
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReaderAuthorAvatar(avatarUrl: String?, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+        contentAlignment = Alignment.Center
+    ) {
+        if (avatarUrl != null) {
+            AsyncImage(
+                model = avatarUrl,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            // Same emoji-placeholder pattern as AuthorPageScreen's AuthorAvatar / other
+            // missing-image fallbacks across the app.
+            Text("🖋️", fontSize = 18.sp)
         }
     }
 }

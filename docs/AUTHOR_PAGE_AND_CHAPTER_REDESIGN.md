@@ -1,8 +1,8 @@
 # ARKster — Author Page & Chapter Page Redesign (staged plan)
 
 ## Status
-**Stage 2 — Author page UI, in progress.** Stage 1 (data layer: `authors`
-table, scanner support, `NovelEntity.authorId`) is complete. Stage 0's
+**Stage 3 — Chapter page (`ReaderScreen.kt`) redesign, in progress.** Stages
+1 (data layer) and 2 (`AuthorPageScreen.kt`) are complete. Stage 0's
 per-fiction `author.json` placement was superseded at Stage 1 kickoff by a
 root-level `authors/` folder (see "Where author.json lives" below).
 
@@ -181,15 +181,41 @@ below. No app code touched.
   Stage 4, per the original staging order below.
 
 ### Stage 3 — Chapter page (`ReaderScreen.kt`) redesign
-- Header row above the chapter body: fiction title / "back to fiction" link
-  and the arc + chapter title, matching the screenshot's top block.
-- Previous/Next chapter buttons, both above and below the chapter body.
-  `ReaderScreen` currently takes only a single `chapter`/`content` pair and
-  an `onBack`; it will need `onPrevious`/`onNext` callbacks (or a small
-  navigation model) wired in from wherever it's launched.
+**Decisions made at kickoff:**
+- Header row above the chapter body: fiction title as a "back to fiction"
+  link (own `onBackToFiction: (Float) -> Unit` callback, same progress-on-
+  exit shape as `onBack` so this exit path saves reading progress too) plus
+  the arc name when the chapter belongs to one. Deliberately a *separate*
+  callback from the existing top-app-bar `onBack` rather than repurposing
+  it - `onBack` keeps its current caller-chosen destination (e.g. Home)
+  unchanged; this stage doesn't touch that behavior.
+- `ReaderScreen` gained `onPrevious`/`onNext: ((Float) -> Unit)?` - `null`
+  (not just a no-op lambda) means "no such chapter", so the buttons render
+  disabled at the first/last chapter instead of merely doing nothing when
+  tapped. The nav row is rendered once above and once below the chapter
+  body, both driven by the same two callbacks.
+- Neighbor resolution lives in `MainActivity`, not `ScannerImpl` or
+  `ReaderScreen` itself: it finds the current chapter's index in the
+  already-loaded, override-applied `chapters` list (the same list
+  `NovelDetailScreen` renders) and looks at index ± 1. This uncovered a
+  pre-existing gap - the "Continue Reading" path on `HomeScreen` jumped
+  straight into the reader without ever calling `loadNovelDetails()` first,
+  unlike every other path into the reader, so `chapters`/`arcs` could be
+  stale or empty there. Fixed as part of this stage (`onContinueReading`
+  now calls `loadNovelDetails()` first) since Previous/Next would otherwise
+  silently miscompute on that one entry point.
 - "About the author" card at the end of the chapter, sourced from the same
-  `author.json`, with avatar, name, a short bio excerpt, and a tap target
-  into the Stage 2 `AuthorPageScreen`.
+  `AuthorEntity` Stage 2 reads (resolved once per fiction, in
+  `MainActivity`, at the two points that create `Screen.Reader` - not
+  re-resolved on every Previous/Next hop, since the author doesn't change
+  within one fiction). Avatar + name + a bio excerpt truncated to 160
+  characters (`AboutAuthorCard`'s `BIO_EXCERPT_LENGTH`), vs the untruncated
+  bio Stage 2's author page shows. No linked author means no card, same as
+  every other optional-metadata absence in this app.
+- The card's tap target (`onAuthorClick`) is wired as a parameter but left
+  at its no-op default in `MainActivity` - actually routing it to
+  `AuthorPageScreen` is Stage 4's job (adding the nav route), not this
+  stage's, matching how Stage 2 also stopped short of nav wiring.
 - Existing font size / line spacing / reading-mode (Light/Sepia/Dark)
   controls stay as-is — those are ARKster reader features Royal Road's web
   chapter page doesn't have, and are out of scope for this change.
@@ -197,7 +223,7 @@ below. No app code touched.
 ### Stage 4 — Navigation & wiring
 - Add an `author/{...}` route to the nav graph in `MainActivity.kt`.
 - Wire tap targets from `NovelDetailScreen` (fiction page byline) and the
-  new Stage 3 "About the author" card into that route.
+  Stage 3 "About the author" card's `onAuthorClick` into that route.
 
 ### Stage 5 — QA / polish
 Exercise the same edge cases `metadata.json` already has to handle:
