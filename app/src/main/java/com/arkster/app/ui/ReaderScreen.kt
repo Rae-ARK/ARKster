@@ -2,6 +2,7 @@ package com.arkster.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -104,6 +105,15 @@ fun ReaderScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(scrollState)
+                // `showControls` already existed and correctly gated both the top bar and
+                // the bottom Text/Spacing/Mode panel below - but nothing ever toggled it, so
+                // it was permanently stuck at its initial `true` and the controls could never
+                // actually be hidden. Tapping the reading area is the standard e-reader
+                // gesture for entering/leaving immersive mode, so wire it up here.
+                .clickable(
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() }
+                ) { showControls.value = !showControls.value }
         ) {
             // Chapter title
             Text(
