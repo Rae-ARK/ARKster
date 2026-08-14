@@ -29,6 +29,7 @@ import androidx.lifecycle.lifecycleScope
 import com.arkster.app.ui.ChapterEditorScreen
 import com.arkster.app.ui.HomeScreen
 import com.arkster.app.ui.LibraryScreen
+import com.arkster.app.ui.MetadataSearchDialog
 import com.arkster.app.ui.NovelDetailScreen
 import com.arkster.app.ui.ReaderScreen
 import com.arkster.app.ui.SettingsScreen
@@ -36,6 +37,8 @@ import com.arkster.app.ui.FictionBrowseScreen
 import com.arkster.app.data.AppDatabase
 import com.arkster.app.data.ArcEntity
 import com.arkster.app.data.ChapterOverrideEntity
+import com.arkster.app.data.GoogleBooksMetadataProvider
+import com.arkster.app.data.NovelMetadataCandidate
 import com.arkster.app.data.ReadingProgressEntity
 import com.arkster.app.data.ScannerImpl
 import com.arkster.app.data.NovelEntity
@@ -57,6 +60,14 @@ sealed class Screen {
     data class ChapterEditor(val novel: NovelEntity) : Screen()
     object Settings : Screen()
     object FictionBrowse : Screen()
+}
+
+// Drives the "Fetch info" dialog from NovelDetailScreen. Idle = dialog hidden.
+sealed class MetadataSearchState {
+    object Idle : MetadataSearchState()
+    data class Loading(val novel: NovelEntity) : MetadataSearchState()
+    data class Results(val novel: NovelEntity, val candidates: List<NovelMetadataCandidate>) : MetadataSearchState()
+    data class Error(val novel: NovelEntity, val message: String) : MetadataSearchState()
 }
 
 // Warm, sepia-toned reading theme - lower contrast than pure light/dark, meant to
@@ -91,10 +102,14 @@ class MainActivity : ComponentActivity() {
     private val currentTheme = mutableStateOf(Theme.LIGHT)
     private val scanProgress = mutableStateOf<Pair<Int, Int>?>(null)  // (current, total) or null if not scanning
     private val scanMessage = mutableStateOf("")
+    private val metadataSearchState = mutableStateOf<MetadataSearchState>(MetadataSearchState.Idle)
     private lateinit var db: AppDatabase
     private lateinit var scanner: ScannerImpl
     private lateinit var prefsManager: PreferencesManager
     private lateinit var contentRepo: TextChapterContentRepository
+    // Stateless, can't throw, needs no Context - constructed eagerly rather than
+    // alongside the other services in onCreate's try/catch.
+    private val metadataProvider = GoogleBooksMetadataProvider()
 
     private val pickFolder = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
         uri?.let { selectedUri ->
@@ -122,7 +137,23 @@ class MainActivity : ComponentActivity() {
                         // we'd silently wipe out anything the user has customized (like their
                         // pagination choice) unless we carry it over from the existing row first.
                         val existing = db.novelDao().findById(scanned.id)
-                        val novel = if (existing != null) scanned.copy(pageSize = existing.pageSize) else scanned
+                        // upsert() REPLACEs the whole row, and scanned is always a fresh
+                        // NovelEntity with every optional field at its default - so a
+                        // rescan would otherwise silently wipe pageSize, reading status,
+                        // and any fetched metadata every single time. Carry all of it
+                        // over from the existing row, not just pageSize.
+                        val novel = if (existing != null) {
+                            scanned.copy(
+                                pageSize = existing.pageSize,
+                                readingStatus = existing.readingStatus,
+                                description = existing.description,
+                                genres = existing.genres,
+                                remoteCoverUrl = existing.remoteCoverUrl,
+                                publishedDate = existing.publishedDate,
+                                externalSourceUrl = existing.externalSourceUrl,
+                                metadataFetchedAt = existing.metadataFetchedAt
+                            )
+                        } else scanned
                         db.novelDao().upsert(novel)
                         withContext(Dispatchers.Main) {
                             val idx = novels.indexOfFirst { it.id == novel.id }
@@ -240,6 +271,49 @@ class MainActivity : ComponentActivity() {
         val inProgress = db.novelDao().byStatus("IN_PROGRESS")
         inProgressNovels.clear()
         inProgressNovels.addAll(inProgress)
+    }
+
+    // Kicks off a "Fetch info" search for one novel. User-triggered only (see
+    // NovelDetailScreen's info action) - never called automatically during a scan.
+    private fun fetchMetadataFor(novel: NovelEntity) {
+        metadataSearchState.value = MetadataSearchState.Loading(novel)
+        lifecycleScope.launch {
+            try {
+                val results = metadataProvider.search(novel.title)
+                metadataSearchState.value = MetadataSearchState.Results(novel, results)
+            } catch (e: Exception) {
+                metadataSearchState.value = MetadataSearchState.Error(novel, "Couldn't reach the metadata source: ${e.message}")
+            }
+        }
+    }
+
+    // Persists a user-confirmed match and refreshes every in-memory copy of this novel
+    // (the library list and, if it's the screen currently on screen, NovelDetail) so the
+    // new info shows up immediately without navigating away and back.
+    private fun applyMetadata(novel: NovelEntity, candidate: NovelMetadataCandidate) {
+        lifecycleScope.launch {
+            try {
+                db.novelDao().updateMetadata(
+                    novelId = novel.id,
+                    description = candidate.description,
+                    genres = candidate.categories.joinToString(", ").ifBlank { null },
+                    remoteCoverUrl = candidate.thumbnailUrl,
+                    publishedDate = candidate.publishedDate,
+                    externalSourceUrl = candidate.infoLink,
+                    fetchedAt = System.currentTimeMillis()
+                )
+                val updated = db.novelDao().findById(novel.id) ?: return@launch
+                val idx = novels.indexOfFirst { it.id == updated.id }
+                if (idx >= 0) novels[idx] = updated
+                val screen = currentScreen.value
+                if (screen is Screen.NovelDetail && screen.novel.id == updated.id) {
+                    currentScreen.value = Screen.NovelDetail(updated)
+                }
+                metadataSearchState.value = MetadataSearchState.Idle
+            } catch (e: Exception) {
+                metadataSearchState.value = MetadataSearchState.Error(novel, "Couldn't save the fetched info: ${e.message}")
+            }
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -430,7 +504,8 @@ class MainActivity : ComponentActivity() {
                                         db.novelDao().updatePageSize(novel.id, pageSize)
                                     }
                                 },
-                                onEditClick = { currentScreen.value = Screen.ChapterEditor(novel) }
+                                onEditClick = { currentScreen.value = Screen.ChapterEditor(novel) },
+                                onFetchInfoClick = { fetchMetadataFor(novel) }
                             )
                         }
 
@@ -488,6 +563,40 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                     }
+                }
+
+                when (val state = metadataSearchState.value) {
+                    is MetadataSearchState.Loading -> {
+                        MetadataSearchDialog(
+                            novelTitle = state.novel.title,
+                            isLoading = true,
+                            errorMessage = null,
+                            candidates = emptyList(),
+                            onCandidateSelected = {},
+                            onDismiss = { metadataSearchState.value = MetadataSearchState.Idle }
+                        )
+                    }
+                    is MetadataSearchState.Results -> {
+                        MetadataSearchDialog(
+                            novelTitle = state.novel.title,
+                            isLoading = false,
+                            errorMessage = null,
+                            candidates = state.candidates,
+                            onCandidateSelected = { candidate -> applyMetadata(state.novel, candidate) },
+                            onDismiss = { metadataSearchState.value = MetadataSearchState.Idle }
+                        )
+                    }
+                    is MetadataSearchState.Error -> {
+                        MetadataSearchDialog(
+                            novelTitle = state.novel.title,
+                            isLoading = false,
+                            errorMessage = state.message,
+                            candidates = emptyList(),
+                            onCandidateSelected = {},
+                            onDismiss = { metadataSearchState.value = MetadataSearchState.Idle }
+                        )
+                    }
+                    is MetadataSearchState.Idle -> {}
                 }
             }
         }

@@ -7,9 +7,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -27,7 +31,10 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
 import com.arkster.app.data.ArcEntity
 import com.arkster.app.data.ChapterEntity
 import com.arkster.app.data.NovelEntity
@@ -44,7 +51,8 @@ fun NovelDetailScreen(
     onBack: () -> Unit,
     onChapterSelected: (ChapterEntity) -> Unit,
     onResizePages: (Int) -> Unit = {},
-    onEditClick: () -> Unit = {}
+    onEditClick: () -> Unit = {},
+    onFetchInfoClick: () -> Unit = {}
 ) {
     val selectedTabIndex = remember { mutableIntStateOf(0) }
     // Seeded from the novel's persisted page_size so the preference survives navigation
@@ -83,11 +91,51 @@ fun NovelDetailScreen(
                 }
             },
             actions = {
+                IconButton(onClick = onFetchInfoClick) {
+                    Icon(Icons.Default.Info, contentDescription = "Fetch info")
+                }
                 IconButton(onClick = onEditClick) {
                     Icon(Icons.Default.Edit, contentDescription = "Edit")
                 }
             }
         )
+
+        // About section - only present once the user has run "Fetch info" at least
+        // once (see MainActivity.fetchMetadataFor). Absent for scanned novels that
+        // haven't been matched to anything, so this never displaces the chapter list.
+        if (novel.description != null || novel.remoteCoverUrl != null) {
+            Row(modifier = Modifier.padding(16.dp)) {
+                if (novel.remoteCoverUrl != null) {
+                    AsyncImage(
+                        model = novel.remoteCoverUrl,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .width(64.dp)
+                            .height(88.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                    )
+                }
+                Column(modifier = Modifier.padding(start = if (novel.remoteCoverUrl != null) 12.dp else 0.dp)) {
+                    if (!novel.genres.isNullOrBlank()) {
+                        Text(
+                            novel.genres,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    if (!novel.description.isNullOrBlank()) {
+                        Text(
+                            novel.description,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 4,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                }
+            }
+        }
 
         // Pagination size controls
         Row(modifier = Modifier.padding(8.dp)) {

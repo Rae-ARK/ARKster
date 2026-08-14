@@ -61,8 +61,9 @@ dependencies {
     // Lifecycle
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.6.2")
 
-    // Coil for images
-    implementation("io.coil-kt:coil:2.4.0")
+    // Coil for images. coil-compose (not the bare coil artifact) is needed for
+    // AsyncImage, used to render remote cover thumbnails in the metadata match picker.
+    implementation("io.coil-kt:coil-compose:2.4.0")
 
     // Navigation
     implementation("androidx.navigation:navigation-compose:2.7.5")

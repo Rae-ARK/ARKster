@@ -16,7 +16,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ScanFingerprintEntity::class,
         ReadingProgressEntity::class
     ],
-    version = 5
+    version = 6
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun novelDao(): NovelDao
@@ -110,11 +110,26 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // Migration from v5 to v6: add optional external-metadata columns to novels
+        // (description, genres, remote cover, published date, source link, fetch
+        // timestamp). All nullable/defaulted, so existing rows just get NULLs and
+        // nothing downstream needs to change to keep working.
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE novels ADD COLUMN description TEXT")
+                database.execSQL("ALTER TABLE novels ADD COLUMN genres TEXT")
+                database.execSQL("ALTER TABLE novels ADD COLUMN remote_cover_url TEXT")
+                database.execSQL("ALTER TABLE novels ADD COLUMN published_date TEXT")
+                database.execSQL("ALTER TABLE novels ADD COLUMN external_source_url TEXT")
+                database.execSQL("ALTER TABLE novels ADD COLUMN metadata_fetched_at INTEGER")
+            }
+        }
+
         fun create(context: Context): AppDatabase = Room.databaseBuilder(
             context.applicationContext,
             AppDatabase::class.java,
             "arkster.db"
-        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
             .fallbackToDestructiveMigration()
             .build()
     }

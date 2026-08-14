@@ -24,6 +24,30 @@ interface NovelDao {
 
     @Query("SELECT * FROM novels WHERE reading_status = :status ORDER BY title")
     suspend fun byStatus(status: String): List<NovelEntity>
+
+    // Writes a confirmed metadata match (see NovelMetadataProvider) onto an existing
+    // novel row. A plain UPDATE rather than upsert, since we're patching fields on a
+    // row that must already exist - upserting a partial entity here would null out
+    // every column not listed.
+    @Query("""
+        UPDATE novels SET
+            description = :description,
+            genres = :genres,
+            remote_cover_url = :remoteCoverUrl,
+            published_date = :publishedDate,
+            external_source_url = :externalSourceUrl,
+            metadata_fetched_at = :fetchedAt
+        WHERE id = :novelId
+    """)
+    suspend fun updateMetadata(
+        novelId: String,
+        description: String?,
+        genres: String?,
+        remoteCoverUrl: String?,
+        publishedDate: String?,
+        externalSourceUrl: String?,
+        fetchedAt: Long
+    )
 }
 
 @Dao

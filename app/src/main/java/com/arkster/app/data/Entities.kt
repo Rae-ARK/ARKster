@@ -16,7 +16,16 @@ data class NovelEntity(
     @ColumnInfo val author: String?,
     @ColumnInfo(name = "cover_uri") val coverUri: String?,
     @ColumnInfo(name = "page_size") val pageSize: Int = 10,  // per-fiction pagination default
-    @ColumnInfo(name = "reading_status") val readingStatus: String = NovelStatus.NOT_STARTED.name  // NOT_STARTED, IN_PROGRESS, COMPLETED
+    @ColumnInfo(name = "reading_status") val readingStatus: String = NovelStatus.NOT_STARTED.name,  // NOT_STARTED, IN_PROGRESS, COMPLETED
+    // Everything below is optional, user-triggered metadata from an external source
+    // (see NovelMetadataProvider) - null until the user explicitly runs "Fetch info"
+    // for this novel. Never populated automatically by the scanner.
+    @ColumnInfo val description: String? = null,
+    @ColumnInfo val genres: String? = null,  // comma-separated; simple enough not to need a TypeConverter
+    @ColumnInfo(name = "remote_cover_url") val remoteCoverUrl: String? = null,  // fallback cover when no local cover.jpg was found
+    @ColumnInfo(name = "published_date") val publishedDate: String? = null,
+    @ColumnInfo(name = "external_source_url") val externalSourceUrl: String? = null,
+    @ColumnInfo(name = "metadata_fetched_at") val metadataFetchedAt: Long? = null  // null = never fetched
 )
 
 @Entity(tableName = "arcs",
