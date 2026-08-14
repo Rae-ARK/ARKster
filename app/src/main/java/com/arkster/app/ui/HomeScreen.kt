@@ -92,10 +92,18 @@ fun HomeScreen(
             // the folder picker on a fresh install, so it needs to be obvious and always
             // present rather than tucked away behind navigation that depends on already
             // having novels.
+            //
+            // NOTE: this branch used to end with `return@Column` to skip the LazyColumn
+            // below. `Column` is an inline composable, and a qualified return out of an
+            // inline composable's trailing lambda skips the compiler-generated group-close
+            // bookkeeping for the rest of the lambda. That corrupts the slot table and
+            // crashes on the very first composition with
+            // `ArrayIndexOutOfBoundsException: index=-5` deep in
+            // `SlotTableKt.key`/`Composer.endRoot` - exactly the crash this app hit on
+            // first launch (empty library = novels.isEmpty() = true). Wrapping the rest of
+            // the content in `else` instead avoids the early return entirely.
             EmptyLibraryPrompt(onSelectFolderClick = onSelectFolderClick)
-            return@Column
-        }
-
+        } else {
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -249,6 +257,7 @@ fun HomeScreen(
                     }
                 }
             }
+        }
         }
     }
 }
