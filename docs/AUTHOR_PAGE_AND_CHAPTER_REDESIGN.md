@@ -1,10 +1,10 @@
 # ARKster — Author Page & Chapter Page Redesign (staged plan)
 
 ## Status
-**Stage 1 — Data layer, in progress.** Stage 0 (this doc) is superseded on one
-point: `author.json` moved from per-fiction folders to a single root-level
-`authors/` folder, decided at Stage 1 kickoff (see "Where author.json lives"
-below). Everything else from Stage 0 still stands.
+**Stage 2 — Author page UI, in progress.** Stage 1 (data layer: `authors`
+table, scanner support, `NovelEntity.authorId`) is complete. Stage 0's
+per-fiction `author.json` placement was superseded at Stage 1 kickoff by a
+root-level `authors/` folder (see "Where author.json lives" below).
 
 ## Motivation
 ARKster's whole pitch (see `README.md`) is making a folder of novels *feel*
@@ -157,14 +157,28 @@ below. No app code touched.
   folder.
 
 ### Stage 2 — Author page UI
-- New `AuthorPageScreen.kt` composable modeled on the profile screenshot:
-  header banner + avatar, stat strip (Follows / Favorites / Reviews /
-  Fictions), "Personal Information" card, "Activity" card, "Author
-  Information" card (fiction count, total words, etc.).
-- Since ARKster has no accounts, network-social affordances from Royal
-  Road's version (Follow button, Block button, notifications) need an
-  explicit per-item decision at Stage 2 kickoff: omit, or keep purely as
-  inert styling for visual parity. Not decided here.
+**Decisions made at kickoff:**
+- New `AuthorPageScreen.kt` composable: banner + overlapping avatar, name,
+  a stat strip (Follows / Favorites / Reviews / Fictions - the first three
+  are the manually-authored display-only numbers from `author.json`'s
+  `stats`, rendered as "—" when unset rather than a misleading 0; Fictions
+  is computed from the novels actually linked to this author, not stored),
+  a "Personal Information" card (joined/location/gender/links - only
+  rendered when at least one is set), a full (non-truncated) "About" card
+  for `bio` when present, and an "Author Information" card. "Total Words"
+  (Stage 0/1's open question 1) is still not shown - no `wordCount` exists
+  anywhere to read yet, so this stays deferred rather than inventing a
+  number.
+- Royal Road's Follow/Block buttons and "Activity" feed are **omitted**,
+  not kept as inert styling: there's no real follow relationship in an
+  offline, account-free app to act on (see README), and an Activity card
+  would have nothing genuine to show without fabricating data.
+- The screen takes its `AuthorEntity` and the already-resolved
+  `List<NovelEntity>` (via `NovelDao.byAuthor`) as plain parameters - it
+  does not query the database itself, matching every other screen's
+  stateless-composable style in this codebase.
+- Not yet wired into navigation or given a real entry point - that's
+  Stage 4, per the original staging order below.
 
 ### Stage 3 — Chapter page (`ReaderScreen.kt`) redesign
 - Header row above the chapter body: fiction title / "back to fiction" link
