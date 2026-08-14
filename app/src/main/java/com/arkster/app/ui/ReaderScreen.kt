@@ -1,6 +1,7 @@
 package com.arkster.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -243,7 +244,13 @@ fun ReaderScreen(
                         Surface(
                             modifier = Modifier
                                 .weight(1f)
-                                .padding(2.dp),
+                                .padding(2.dp)
+                                // The mode Surfaces had no onClick/clickable at all before this -
+                                // the Light/Sepia/Dark row rendered and highlighted the active
+                                // mode correctly, but tapping any of them did nothing, since
+                                // nothing ever wrote to `readingMode.value`. This is what made
+                                // the reading-mode toggle look broken.
+                                .clickable { readingMode.value = mode },
                             color = if (readingMode.value == mode)
                                 MaterialTheme.colorScheme.primary
                             else

@@ -6,10 +6,10 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
@@ -468,7 +468,19 @@ class MainActivity : ComponentActivity() {
                         colorScheme.background.luminance() > 0.5f
                 }
 
-                Column(modifier = Modifier.fillMaxSize()) {
+                // The manifest's android:theme is a fixed system light theme (needed before
+                // Compose ever runs), and MaterialTheme's colorScheme only styles the widgets
+                // that explicitly read it - it does NOT paint the window/root background for
+                // you. Without an explicit background here, any area not covered by a themed
+                // widget (status bar edge-to-edge gaps, screen transition frames, etc.) shows
+                // the underlying light window background regardless of Dark/Warm Paper being
+                // selected - the theme "not applying evenly" that users see when switching
+                // themes. Painting the root Column with the resolved background fixes that.
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(colorScheme.background)
+                ) {
                     val savedUri = prefsManager.libraryUri.collectAsState(initial = null)
 
                     when (currentScreen.value) {
@@ -522,9 +534,16 @@ class MainActivity : ComponentActivity() {
                         }
 
                         is Screen.Library -> {
-                            Button(onClick = { pickFolder.launch(null) }) {
-                                Text(if (savedUri.value != null) "Rescan" else "Select library folder")
-                            }
+                            // NOTE: there used to be a stray `Button("Rescan")` composed here,
+                            // above/outside LibraryScreen's own Column. It wasn't wrapped in any
+                            // layout that accounts for the status bar, so it rendered as a
+                            // floating pill overlapping the status bar icons on every launch of
+                            // this screen. It was also misleading - it always launched the folder
+                            // picker even when labeled "Rescan", instead of actually rescanning
+                            // the already-selected folder like Settings' "Rescan Library" does.
+                            // Removed; the properly-wired rescan/select-folder flow already
+                            // lives in Settings (reachable via the gear icon LibraryScreen
+                            // already renders in its own TopAppBar).
                             LibraryScreen(
                                 novels = novels,
                                 recentlyRead = recentlyRead,
