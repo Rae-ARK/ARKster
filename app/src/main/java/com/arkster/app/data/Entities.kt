@@ -94,6 +94,11 @@ data class ChapterEntity(
     @ColumnInfo(name = "arc_id") val arcId: String?,
     @ColumnInfo val number: Int?,
     @ColumnInfo val title: String,
+    // 0 = regular chapter, 1 = bonus/side content ("~" filename prefix - interlude,
+    // extra chapter, side story, omake, ...), 2 = closing/meta content ("!" filename
+    // prefix - afterword, author's note, ...). Regular chapters still sort by `number`
+    // within tier 0 exactly as before; see ScannerImpl.parseChapter and bugs.md Bug 2.
+    @ColumnInfo(name = "sort_tier") val sortTier: Int = 0,
     @ColumnInfo(name = "source_path") val sourcePath: String
 )
 

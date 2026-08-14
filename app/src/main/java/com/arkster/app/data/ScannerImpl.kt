@@ -22,12 +22,38 @@ class ScannerImpl(private val context: Context) {
         // computeFingerprint) instead of the novel folder's own lastModified/length,
         // which many SAF providers don't update on child-file changes. Bumping forces
         // every existing fingerprint to be treated as stale exactly once.
-        private const val CURRENT_SCAN_VERSION = 4
+        // v5: parseChapter now classifies bonus/closing content into sort_tier (see
+        // bugs.md Bug 2) - bumped so every already-scanned novel gets reparsed once
+        // and picks up the new tiers, instead of sitting unclassified until its next
+        // unrelated rescan.
+        private const val CURRENT_SCAN_VERSION = 5
 
         private val ARC_PATTERNS = listOf(
             Regex("^(?:Arc|Volume|Book|Part)\\s*(\\d+)?", RegexOption.IGNORE_CASE),
             Regex("^(?:弧|卷|部)\\s*(\\d+)?", RegexOption.IGNORE_CASE)
         )
+
+        // Chapter sort tiers - see parseChapter() and bugs.md Bug 2. Regular chapters
+        // (0) sort first by their own number/title, exactly as before this fix; bonus
+        // content (1) and closing content (2) always sort after every regular chapter
+        // in the same folder, in that order.
+        private const val TIER_REGULAR = 0
+        private const val TIER_BONUS = 1
+        private const val TIER_CLOSING = 2
+
+        // Marker prefixes an author can put directly on a filename to control tier,
+        // independent of whatever word they use ("Interlude", "SS", "Omake", "番外",
+        // ...) - see bugs.md Bug 2 for the full rationale.
+        private const val BONUS_MARKER = '~'
+        private const val CLOSING_MARKER = '!'
+
+        // Best-effort fallback for files that predate the marker convention and don't
+        // use it - keeps existing libraries from regressing to unordered rather than
+        // requiring every author to immediately rename every file. Only consulted when
+        // no marker prefix is present; once a file is renamed with ~ / ! that's
+        // authoritative and these keywords no longer apply to it.
+        private val LEGACY_CLOSING_KEYWORDS = listOf("afterword", "author's note", "authors note")
+        private val LEGACY_BONUS_KEYWORDS = listOf("interlude", "side story", "omake", "extra chapter", "bonus chapter")
     }
 
     suspend fun scanRoot(
@@ -215,14 +241,15 @@ class ScannerImpl(private val context: Context) {
         val files = folder.listFiles().filter { it.isFile && it.name?.matches(Regex("(?i).*\\.(txt|md)$")) == true }
         val ids = mutableListOf<String>()
         files.forEachIndexed { idx, file ->
-            val (number, title) = parseChapter(file.name ?: "Chapter ${idx + 1}")
+            val parsed = parseChapter(file.name ?: "Chapter ${idx + 1}")
             val chapterId = UUID.nameUUIDFromBytes("${novelId}:${file.uri}".toByteArray()).toString()
             val chapter = ChapterEntity(
                 id = chapterId,
                 novelId = novelId,
                 arcId = arcId,
-                number = number,
-                title = title,
+                number = parsed.number,
+                title = parsed.title,
+                sortTier = parsed.sortTier,
                 sourcePath = file.uri.toString()
             )
             db.chapterDao().upsert(chapter)
@@ -235,18 +262,54 @@ class ScannerImpl(private val context: Context) {
         return ARC_PATTERNS.any { it.containsMatchIn(folderName) }
     }
 
-    private fun parseChapter(filename: String): Pair<Int?, String> {
-        // Heuristic 1: leading number + delimiter
-        val numberPattern = Regex("^\\s*(\\d+)\\s+(.+?)\\.(txt|md)$", RegexOption.IGNORE_CASE)
-        val match = numberPattern.matchEntire(filename)
-        if (match != null) {
-            return Pair(match.groupValues[1].toIntOrNull(), match.groupValues[2].trim())
+    private data class ParsedChapter(val number: Int?, val title: String, val sortTier: Int)
+
+    // Determines a chapter's (number, title, sortTier) from its filename. See bugs.md
+    // Bug 2: a leading "~" marks bonus/side content (interlude, extra chapter, side
+    // story, omake, ...) and a leading "!" marks closing/meta content (afterword,
+    // author's note, ...) - both sort after every regular chapter in their folder,
+    // closing always last. Markers are stripped before the title is derived, so
+    // "!Author's Afterword.txt" displays as "Author's Afterword", not
+    // "!Author's Afterword". An optional number right after the marker (e.g.
+    // "~2 Side Story.txt") still controls order within that tier.
+    private fun parseChapter(filename: String): ParsedChapter {
+        val withoutExt = filename.replaceFirst(Regex("\\.(txt|md)$", RegexOption.IGNORE_CASE), "")
+
+        val (marker, rest) = when (withoutExt.firstOrNull()) {
+            BONUS_MARKER -> TIER_BONUS to withoutExt.drop(1)
+            CLOSING_MARKER -> TIER_CLOSING to withoutExt.drop(1)
+            else -> TIER_REGULAR to withoutExt
         }
-        // Fallback: strip extension and normalize title
-        val title = filename.replaceFirst(Regex("\\.(txt|md)$", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("[_-]"), " ")
-            .trim()
-        return Pair(null, title)
+
+        // Heuristic: leading number + delimiter, e.g. "026 Not Again" or, once a
+        // marker's been stripped, "2 Side Story".
+        val numberPattern = Regex("^\\s*(\\d+)\\s+(.+)$")
+        val match = numberPattern.matchEntire(rest.trim())
+        val number: Int?
+        val rawTitle: String
+        if (match != null) {
+            number = match.groupValues[1].toIntOrNull()
+            rawTitle = match.groupValues[2].trim()
+        } else {
+            number = null
+            rawTitle = rest.replace(Regex("[_-]"), " ").trim()
+        }
+        val title = rawTitle.ifBlank { filename }
+
+        // No marker on this file - fall back to keyword sniffing so libraries that
+        // predate the marker convention don't regress to unordered.
+        val sortTier = if (marker != TIER_REGULAR) {
+            marker
+        } else {
+            val lower = title.lowercase()
+            when {
+                LEGACY_CLOSING_KEYWORDS.any { lower.contains(it) } -> TIER_CLOSING
+                LEGACY_BONUS_KEYWORDS.any { lower.contains(it) } -> TIER_BONUS
+                else -> TIER_REGULAR
+            }
+        }
+
+        return ParsedChapter(number, title, sortTier)
     }
 
     // Walks the novel folder (root + one level of arc subfolders, matching where
@@ -297,9 +360,21 @@ class ScannerImpl(private val context: Context) {
         )
     }
 
+    // See bugs.md Bug 3a: this used to require the filename to be *exactly*
+    // "cover.<ext>", so per-arc covers named e.g. "Arc1_Cover.jpg" or "cover (1).png"
+    // were silently skipped. Now: prefer an exact "cover.<ext>" match if one exists
+    // (keeps today's convention as the unambiguous default), otherwise fall back to
+    // any image in the folder whose name contains "cover" as a standalone word.
     private fun findCoverUri(folder: DocumentFile): String? {
-        val imgs = folder.listFiles().filter { it.isFile && it.name?.matches(Regex("(?i)cover\\.(jpg|png|webp)$")) == true }
-        return imgs.firstOrNull()?.uri?.toString()
+        val images = folder.listFiles().filter {
+            it.isFile && it.name?.matches(Regex("(?i).*\\.(jpg|jpeg|png|webp)$")) == true
+        }
+        images.firstOrNull { it.name?.matches(Regex("(?i)cover\\.(jpg|jpeg|png|webp)$")) == true }
+            ?.let { return it.uri.toString() }
+        return images.firstOrNull { image ->
+            val base = image.name?.substringBeforeLast('.') ?: return@firstOrNull false
+            Regex("(?i)(^|[^a-z0-9])cover([^a-z0-9]|$)").containsMatchIn(base)
+        }?.uri?.toString()
     }
 
     private data class LocalMetadata(
@@ -382,6 +457,21 @@ class ScannerImpl(private val context: Context) {
             it.isFile && it.name?.equals(avatarFilename, ignoreCase = true) == true
         }?.uri?.toString()
 
+    // Convention-based fallback for when author.json doesn't specify an "avatar" (or
+    // has none at all): a same-folder image named after the author, e.g.
+    // "authors/<name>.png" or "authors/<id>.png", the same pattern as a novel/arc's
+    // cover.*. Tries the id first (usually already filename-safe, lowercase) then the
+    // display name, and accepts jpg/jpeg/png/webp.
+    private fun findAuthorAvatarUri(authorsFolder: DocumentFile, id: String, name: String): String? {
+        val images = authorsFolder.listFiles().filter {
+            it.isFile && it.name?.matches(Regex("(?i).*\\.(jpg|jpeg|png|webp)$")) == true
+        }
+        fun matching(key: String): String? = images.firstOrNull {
+            it.name?.substringBeforeLast('.')?.equals(key, ignoreCase = true) == true
+        }?.uri?.toString()
+        return matching(id) ?: matching(name)
+    }
+
     // Reads and parses one authors/<id>.json file. See "authors/<id>.json schema" in
     // AUTHOR_PAGE_AND_CHAPTER_REDESIGN.md for the full field list. All fields optional;
     // malformed JSON just means this file contributes nothing (fail soft, same
@@ -453,7 +543,11 @@ class ScannerImpl(private val context: Context) {
                 AuthorEntity(
                     id = id,
                     name = name,
-                    avatarUri = parsed?.avatar?.let { resolveAuthorAvatarUri(authorsFolder, it) },
+                    // Explicit "avatar" field in author.json wins if it resolves;
+                    // otherwise fall back to a same-folder authors/<id-or-name>.png
+                    // (jpg/webp also accepted) - see findAuthorAvatarUri above.
+                    avatarUri = parsed?.avatar?.let { resolveAuthorAvatarUri(authorsFolder, it) }
+                        ?: findAuthorAvatarUri(authorsFolder, id, name),
                     bio = parsed?.bio,
                     joined = parsed?.joined,
                     location = parsed?.location,

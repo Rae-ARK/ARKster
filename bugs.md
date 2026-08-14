@@ -143,3 +143,57 @@ this repo.**
 | 2 | `MainActivity.kt` | 233, 240 | Default chapter order inherited straight from DB order above |
 | 3a | `ScannerImpl.kt` | 300-303 | `findCoverUri` regex requires filename to be exactly `cover.<ext>` |
 | 3b | `ReaderScreen.kt` | (not present in this commit) | No arc/novel/placeholder cover fallback chain on this screen yet |
+
+---
+
+## Stage 2 status (this patch)
+
+Fixed:
+
+- **Bug 2** — `ScannerImpl.parseChapter()` now reads a `~`/`!` filename-prefix
+  marker (bonus/closing content) and returns an explicit `sortTier`, stored
+  on a new `ChapterEntity.sortTier` column (migration `MIGRATION_7_8`, DB
+  v7 → v8). `ChapterDao.forNovel`/`forArc` now `ORDER BY sort_tier, number,
+  title` so bonus/closing content always lands after every regular chapter,
+  closing always last, instead of relying on `number` alone (which was
+  `null` — and so sorted first — for anything unnumbered). A keyword-based
+  fallback (`afterword`, `interlude`, `side story`, `omake`, `extra
+  chapter`, `bonus chapter`) still applies to files with no marker, so
+  existing libraries don't regress until they're renamed to use the new
+  convention. `ScannerImpl.CURRENT_SCAN_VERSION` bumped 4 → 5 so every
+  already-scanned novel gets reparsed once and picks up tiers on next scan.
+- **Bug 3a** — `findCoverUri()` now prefers an exact `cover.<ext>` match
+  (unchanged default), but falls back to any image in the folder whose
+  name contains "cover" as a standalone word (`Arc1_Cover.jpg`,
+  `cover (1).png`, `COVER_ART.jpg`, etc.), so per-arc covers that don't
+  happen to be named exactly `cover.*` are picked up.
+- **Extra, requested this round**: author avatars now also resolve via a
+  same-folder convention file — `authors/<id>.png` or `authors/<name>.png`
+  (jpg/webp also accepted) — the same pattern as a novel/arc's `cover.*`.
+  This only kicks in when `author.json` has no `"avatar"` field, or that
+  field doesn't resolve to a real file; an explicit `"avatar"` in the JSON
+  still wins when present. New helper: `findAuthorAvatarUri()` in
+  `ScannerImpl.kt`.
+
+Still open:
+
+- **Bug 1** — still needs the screenshot/repro detail from the original
+  report; not addressed in this patch.
+- **Bug 3b** — the reader-page cover fallback chain (arc → novel →
+  placeholder) still can't be patched here since that UI isn't in this
+  repo snapshot yet. Once it's pushed (or pasted in), it needs to read
+  `arcId` → `ArcEntity.coverUri` → `NovelEntity.coverUri` → placeholder in
+  that order.
+
+### Files touched this stage
+- `app/src/main/java/com/arkster/app/data/Entities.kt` — `ChapterEntity.sortTier`
+- `app/src/main/java/com/arkster/app/data/Dao.kt` — `ORDER BY sort_tier, number, title`
+- `app/src/main/java/com/arkster/app/data/AppDatabase.kt` — DB v7 → v8, `MIGRATION_7_8`
+- `app/src/main/java/com/arkster/app/data/ScannerImpl.kt` — marker-based `parseChapter`, broadened `findCoverUri`, new `findAuthorAvatarUri`, `CURRENT_SCAN_VERSION` 4 → 5
+
+### Not yet in this patch, worth confirming
+- Whatever number-formatting an author uses after a marker (`~2 ...`) is
+  parsed with the same plain `(\d+)\s+` heuristic as regular chapters —
+  fine for `~2 Side Story.txt`, but a marker glued straight to a number
+  with no space (`~2Side Story.txt`) won't match and falls back to
+  filename-order within its tier. Flag if that's a real pattern in use.

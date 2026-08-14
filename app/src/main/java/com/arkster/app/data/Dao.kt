@@ -89,10 +89,13 @@ interface ChapterDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(chapter: ChapterEntity)
 
-    @Query("SELECT * FROM chapters WHERE novel_id = :novelId ORDER BY number, title")
+    // sort_tier first so bonus (1) and closing (2) content always lands after every
+    // regular chapter (0) in the same folder, regardless of number/title - see
+    // bugs.md Bug 2. number/title remain the tie-break within a tier, same as before.
+    @Query("SELECT * FROM chapters WHERE novel_id = :novelId ORDER BY sort_tier, number, title")
     suspend fun forNovel(novelId: String): List<ChapterEntity>
 
-    @Query("SELECT * FROM chapters WHERE arc_id = :arcId ORDER BY number, title")
+    @Query("SELECT * FROM chapters WHERE arc_id = :arcId ORDER BY sort_tier, number, title")
     suspend fun forArc(arcId: String): List<ChapterEntity>
 
     @Query("SELECT * FROM chapters WHERE id = :chapterId")

@@ -17,7 +17,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ScanFingerprintEntity::class,
         ReadingProgressEntity::class
     ],
-    version = 7
+    version = 8
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun novelDao(): NovelDao
@@ -157,11 +157,24 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // Migration from v7 to v8: add sort_tier to chapters (see bugs.md Bug 2 -
+        // ScannerImpl now classifies each chapter as regular/bonus/closing via a
+        // filename marker, instead of relying solely on `number`/`title` ordering).
+        // Existing rows backfill to 0 (regular); ScannerImpl.CURRENT_SCAN_VERSION is
+        // bumped alongside this so every novel gets rescanned once and its chapters
+        // reclassified, rather than sitting at the default tier until the next
+        // unrelated rescan happens to touch them.
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE chapters ADD COLUMN sort_tier INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun create(context: Context): AppDatabase = Room.databaseBuilder(
             context.applicationContext,
             AppDatabase::class.java,
             "arkster.db"
-        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
             .fallbackToDestructiveMigration()
             .build()
     }
