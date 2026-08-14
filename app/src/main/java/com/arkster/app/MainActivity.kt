@@ -317,33 +317,81 @@ class MainActivity : ComponentActivity() {
     }
 
     // Shared fallback UI for anything that throws before/while the real screen renders.
-    // Pulled out so BOTH the service-construction guard below AND the setContent guard
-    // (see onCreate) can show the same "here's exactly what broke" screen instead of a
-    // silent process death - a stack trace on-screen beats needing adb/logcat to debug
-    // a phone-only crash report.
-    private fun renderCrashScreen(e: Throwable) {
+    // Pulled out so BOTH the service-construction guard, the setContent guard, and the
+    // saved-crash check below can show the same "here's exactly what broke" screen
+    // instead of a silent process death - a stack trace on-screen beats needing
+    // adb/logcat to debug a phone-only crash report.
+    private fun renderCrashScreen(title: String, details: String) {
         setContent {
             MaterialTheme {
                 androidx.compose.foundation.layout.Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(24.dp),
-                    verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center
+                        .padding(24.dp)
                 ) {
-                    Text("ARKster failed to start", style = MaterialTheme.typography.titleLarge)
-                    Text(
-                        (e::class.java.name + ": " + e.message) + "\n\n" +
-                            e.stackTrace.take(12).joinToString("\n") { "  at $it" },
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(top = 16.dp)
-                    )
+                    Text(title, style = MaterialTheme.typography.titleLarge)
+                    androidx.compose.foundation.lazy.LazyColumn(modifier = Modifier.padding(top = 16.dp)) {
+                        item {
+                            Text(details, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
                 }
             }
         }
     }
 
+    private fun renderCrashScreen(e: Throwable) {
+        renderCrashScreen(
+            "ARKster failed to start",
+            (e::class.java.name + ": " + e.message) + "\n\n" +
+                e.stackTrace.take(30).joinToString("\n") { "  at $it" }
+        )
+    }
+
+    companion object {
+        private const val CRASH_PREFS = "arkster_crash_info"
+        private const val CRASH_KEY = "last_crash"
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Safety net of last resort. The try/catch blocks below only catch exceptions
+        // thrown synchronously on THIS call stack - they cannot catch anything thrown
+        // inside a lifecycleScope.launch { } coroutine body (theme.collect, libraryUri.
+        // collect, etc.), since those run on their own dispatcher and throw well after
+        // the launch{} call that started them has already returned. An uncaught
+        // exception there crashes the process instantly with nothing on screen and
+        // nothing catchable here - which is exactly what "opens and immediately exits,
+        // no error screen" looks like. Installing a global handler is the only way to
+        // observe it: it can't stop the crash (the process still has to die), but it
+        // persists the trace first so the NEXT launch can show it.
+        val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            try {
+                getSharedPreferences(CRASH_PREFS, MODE_PRIVATE).edit()
+                    .putString(
+                        CRASH_KEY,
+                        (throwable::class.java.name + ": " + throwable.message) + "\n\n" +
+                            throwable.stackTrace.take(30).joinToString("\n") { "  at $it" }
+                    )
+                    .commit() // commit(), not apply() - must be on disk before the process dies
+            } catch (_: Throwable) {
+                // Never let the crash handler itself throw and mask the original crash.
+            }
+            previousHandler?.uncaughtException(thread, throwable)
+        }
+
+        // If the previous launch crashed, show that trace now instead of trying to
+        // start normally again (which would likely just crash the same way a second
+        // time with nothing new learned).
+        val crashPrefs = getSharedPreferences(CRASH_PREFS, MODE_PRIVATE)
+        val lastCrash = crashPrefs.getString(CRASH_KEY, null)
+        if (lastCrash != null) {
+            crashPrefs.edit().remove(CRASH_KEY).apply()
+            renderCrashScreen("ARKster crashed last time it opened", lastCrash)
+            return
+        }
 
         // AppDatabase.create() (and the other service objects below) are the very first
         // things onCreate does, before setContent ever runs. Room.databaseBuilder(...).build()
