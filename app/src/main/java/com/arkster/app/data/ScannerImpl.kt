@@ -25,10 +25,16 @@ class ScannerImpl(private val context: Context) {
         )
     }
 
-    suspend fun scanRoot(treeUri: Uri, onDiscovered: suspend (NovelEntity) -> Unit) = withContext(Dispatchers.IO) {
+    suspend fun scanRoot(
+        treeUri: Uri,
+        onDiscovered: suspend (NovelEntity) -> Unit,
+        onProgress: suspend (current: Int, total: Int, message: String) -> Unit = { _, _, _ -> }
+    ) = withContext(Dispatchers.IO) {
         val root = DocumentFile.fromTreeUri(context, treeUri) ?: return@withContext
         val children = root.listFiles()
-        for (child in children) {
+        val total = children.size
+        children.forEachIndexed { index, child ->
+            onProgress(index + 1, total, "Scanning ${child.name}...")
             if (child.isDirectory) {
                 val title = child.name ?: "Unknown"
                 val id = UUID.nameUUIDFromBytes((treeUri.toString() + ":" + child.uri.toString()).toByteArray()).toString()
@@ -37,9 +43,16 @@ class ScannerImpl(private val context: Context) {
                 onDiscovered(novel)
             }
         }
+        onProgress(total, total, "Scan complete")
     }
 
-    suspend fun scanChaptersForNovel(novelFolder: DocumentFile, novelId: String, db: AppDatabase) = withContext(Dispatchers.IO) {
+    suspend fun scanChaptersForNovel(
+        novelFolder: DocumentFile,
+        novelId: String,
+        db: AppDatabase,
+        onProgress: suspend (message: String) -> Unit = {}
+    ) = withContext(Dispatchers.IO) {
+        onProgress("Checking fingerprint...")
         val fingerprint = computeFingerprint(novelFolder, novelId)
 
         // Check if we can skip rescan (incremental optimization)
@@ -47,6 +60,7 @@ class ScannerImpl(private val context: Context) {
         if (existingFingerprint != null && existingFingerprint.scanVersion == CURRENT_SCAN_VERSION &&
             existingFingerprint.lastModified == fingerprint.lastModified && existingFingerprint.size == fingerprint.size) {
             // Unchanged, skip rescan
+            onProgress("No changes detected")
             return@withContext
         }
 
@@ -59,6 +73,7 @@ class ScannerImpl(private val context: Context) {
         // the source file itself is gone.
 
         // Detect arcs (subfolders matching arc patterns) and upsert them in place.
+        onProgress("Detecting arcs...")
         val arcFolders = novelFolder.listFiles()
             .filter { it.isDirectory && isArcFolder(it.name ?: "") }
         val arcs = mutableMapOf<String, ArcEntity>()
@@ -81,6 +96,7 @@ class ScannerImpl(private val context: Context) {
 
         // Parse chapter files from root and arc subfolders, tracking which chapter IDs
         // are still present so we can remove only the ones that truly vanished.
+        onProgress("Parsing chapters...")
         val seenChapterIds = mutableSetOf<String>()
         seenChapterIds += parseChaptersInFolder(novelFolder, novelId, null, db)
         for (arcFolder in arcFolders) {
@@ -93,6 +109,7 @@ class ScannerImpl(private val context: Context) {
         }
 
         // Save fingerprint
+        onProgress("Saving fingerprint...")
         db.scanFingerprintDao().upsert(fingerprint)
     }
 

@@ -5,13 +5,18 @@ import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.PrimaryKey
 
+enum class NovelStatus {
+    NOT_STARTED, IN_PROGRESS, COMPLETED
+}
+
 @Entity(tableName = "novels")
 data class NovelEntity(
     @PrimaryKey val id: String,
     @ColumnInfo val title: String,
     @ColumnInfo val author: String?,
     @ColumnInfo(name = "cover_uri") val coverUri: String?,
-    @ColumnInfo(name = "page_size") val pageSize: Int = 10  // per-fiction pagination default
+    @ColumnInfo(name = "page_size") val pageSize: Int = 10,  // per-fiction pagination default
+    @ColumnInfo(name = "reading_status") val readingStatus: String = NovelStatus.NOT_STARTED.name  // NOT_STARTED, IN_PROGRESS, COMPLETED
 )
 
 @Entity(tableName = "arcs",

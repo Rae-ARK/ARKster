@@ -16,7 +16,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ScanFingerprintEntity::class,
         ReadingProgressEntity::class
     ],
-    version = 3
+    version = 4
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun novelDao(): NovelDao
@@ -92,10 +92,17 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // Migration from v3 to v4: add reading_status column to novels
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE novels ADD COLUMN reading_status TEXT NOT NULL DEFAULT 'NOT_STARTED'")
+            }
+        }
+
         fun create(context: Context): AppDatabase = Room.databaseBuilder(
             context.applicationContext,
             AppDatabase::class.java,
             "arkster.db"
-        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
+        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build()
     }
 }

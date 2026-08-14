@@ -22,10 +22,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.lifecycleScope
 import com.arkster.app.ui.ChapterEditorScreen
+import com.arkster.app.ui.HomeScreen
 import com.arkster.app.ui.LibraryScreen
 import com.arkster.app.ui.NovelDetailScreen
 import com.arkster.app.ui.ReaderScreen
 import com.arkster.app.ui.SettingsScreen
+import com.arkster.app.ui.FictionBrowseScreen
 import com.arkster.app.data.AppDatabase
 import com.arkster.app.data.ArcEntity
 import com.arkster.app.data.ChapterOverrideEntity
@@ -35,6 +37,7 @@ import com.arkster.app.data.NovelEntity
 import com.arkster.app.data.ChapterEntity
 import com.arkster.app.data.PreferencesManager
 import com.arkster.app.data.Theme
+import com.arkster.app.data.NovelStatus
 import com.arkster.app.data.TextChapterContentRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -42,11 +45,13 @@ import kotlinx.coroutines.withContext
 import java.util.UUID
 
 sealed class Screen {
+    object Home : Screen()
     object Library : Screen()
     data class NovelDetail(val novel: NovelEntity) : Screen()
     data class Reader(val novelId: String, val chapter: ChapterEntity, val content: String) : Screen()
     data class ChapterEditor(val novel: NovelEntity) : Screen()
     object Settings : Screen()
+    object FictionBrowse : Screen()
 }
 
 // Warm, sepia-toned reading theme - lower contrast than pure light/dark, meant to
@@ -74,10 +79,13 @@ class MainActivity : ComponentActivity() {
     private val chapters = mutableStateListOf<ChapterEntity>() // overrides already applied
     private val arcs = mutableStateListOf<ArcEntity>()
     private val recentlyRead = mutableStateListOf<NovelEntity>()
+    private val inProgressNovels = mutableStateListOf<NovelEntity>()
     private val overriddenChapterIds = mutableStateOf<Set<String>>(emptySet())
     private val arcStartChapterIds = mutableStateOf<Set<String>>(emptySet())
-    private val currentScreen = mutableStateOf<Screen>(Screen.Library)
+    private val currentScreen = mutableStateOf<Screen>(Screen.Home)
     private val currentTheme = mutableStateOf(Theme.LIGHT)
+    private val scanProgress = mutableStateOf<Pair<Int, Int>?>(null)  // (current, total) or null if not scanning
+    private val scanMessage = mutableStateOf("")
     private lateinit var db: AppDatabase
     private lateinit var scanner: ScannerImpl
     private lateinit var prefsManager: PreferencesManager
@@ -94,24 +102,40 @@ class MainActivity : ComponentActivity() {
     }
 
     private suspend fun startScan(treeUri: Uri) {
-        scanner.scanRoot(treeUri) { scanned ->
-            // scanRoot always builds a fresh NovelEntity with default field values (e.g.
-            // pageSize = 10). Upsert REPLACEs the whole row, so on rescan we'd silently
-            // wipe out anything the user has customized (like their pagination choice)
-            // unless we carry it over from the existing row first.
-            val existing = db.novelDao().findById(scanned.id)
-            val novel = if (existing != null) scanned.copy(pageSize = existing.pageSize) else scanned
-            db.novelDao().upsert(novel)
-            withContext(Dispatchers.Main) {
-                val idx = novels.indexOfFirst { it.id == novel.id }
-                if (idx >= 0) novels[idx] = novel else novels.add(novel)
+        scanner.scanRoot(treeUri, 
+            onDiscovered = { scanned ->
+                // scanRoot always builds a fresh NovelEntity with default field values (e.g.
+                // pageSize = 10). Upsert REPLACEs the whole row, so on rescan we'd silently
+                // wipe out anything the user has customized (like their pagination choice)
+                // unless we carry it over from the existing row first.
+                val existing = db.novelDao().findById(scanned.id)
+                val novel = if (existing != null) scanned.copy(pageSize = existing.pageSize) else scanned
+                db.novelDao().upsert(novel)
+                withContext(Dispatchers.Main) {
+                    val idx = novels.indexOfFirst { it.id == novel.id }
+                    if (idx >= 0) novels[idx] = novel else novels.add(novel)
+                }
+                // After discovering a novel, scan its chapters and arcs
+                val novelFolder = DocumentFile.fromTreeUri(this@MainActivity, treeUri)
+                    ?.listFiles()?.find { it.name == novel.title && it.isDirectory }
+                if (novelFolder != null) {
+                    scanner.scanChaptersForNovel(novelFolder, novel.id, db) { message ->
+                        withContext(Dispatchers.Main) {
+                            scanMessage.value = "Scanning ${novel.title}: $message"
+                        }
+                    }
+                }
+            },
+            onProgress = { current, total, message ->
+                withContext(Dispatchers.Main) {
+                    scanProgress.value = Pair(current, total)
+                    scanMessage.value = message
+                }
             }
-            // After discovering a novel, scan its chapters and arcs
-            val novelFolder = DocumentFile.fromTreeUri(this@MainActivity, treeUri)
-                ?.listFiles()?.find { it.name == novel.title && it.isDirectory }
-            if (novelFolder != null) {
-                scanner.scanChaptersForNovel(novelFolder, novel.id, db)
-            }
+        )
+        withContext(Dispatchers.Main) {
+            scanProgress.value = null
+            scanMessage.value = ""
         }
         refreshRecentlyRead()
     }
@@ -190,6 +214,11 @@ class MainActivity : ComponentActivity() {
         val byId = novels.associateBy { it.id }
         recentlyRead.clear()
         recentlyRead.addAll(ids.mapNotNull { byId[it] })
+        
+        // Also refresh in-progress novels
+        val inProgress = db.novelDao().byStatus("IN_PROGRESS")
+        inProgressNovels.clear()
+        inProgressNovels.addAll(inProgress)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -221,6 +250,54 @@ class MainActivity : ComponentActivity() {
                     val savedUri = prefsManager.libraryUri.collectAsState(initial = null)
 
                     when (currentScreen.value) {
+                        is Screen.Home -> {
+                            HomeScreen(
+                                novels = novels,
+                                inProgressNovels = inProgressNovels,
+                                onNovelClick = { novel ->
+                                    lifecycleScope.launch {
+                                        loadNovelDetails(novel)
+                                        currentScreen.value = Screen.NovelDetail(novel)
+                                    }
+                                },
+                                onContinueReading = { novel ->
+                                    lifecycleScope.launch {
+                                        val lastProgress = db.readingProgressDao().forNovel(novel.id)
+                                        if (lastProgress != null) {
+                                            val chapter = db.chapterDao().findById(lastProgress.chapterId)
+                                            if (chapter != null) {
+                                                val chapterContent = contentRepo.getTextContent(chapter.sourcePath)
+                                                currentScreen.value = Screen.Reader(novel.id, chapter, chapterContent.body)
+                                            }
+                                        } else {
+                                            loadNovelDetails(novel)
+                                            currentScreen.value = Screen.NovelDetail(novel)
+                                        }
+                                    }
+                                },
+                                onBrowseClick = { currentScreen.value = Screen.FictionBrowse },
+                                onSettingsClick = { currentScreen.value = Screen.Settings },
+                                onSearch = { query ->
+                                    if (query.isNotEmpty()) {
+                                        currentScreen.value = Screen.FictionBrowse
+                                    }
+                                }
+                            )
+                        }
+
+                        is Screen.FictionBrowse -> {
+                            FictionBrowseScreen(
+                                novels = novels,
+                                onNovelSelected = { novel ->
+                                    lifecycleScope.launch {
+                                        loadNovelDetails(novel)
+                                        currentScreen.value = Screen.NovelDetail(novel)
+                                    }
+                                },
+                                onBack = { currentScreen.value = Screen.Home }
+                            )
+                        }
+
                         is Screen.Library -> {
                             Button(onClick = { pickFolder.launch(null) }) {
                                 Text(if (savedUri.value != null) "Rescan" else "Select library folder")
@@ -228,10 +305,28 @@ class MainActivity : ComponentActivity() {
                             LibraryScreen(
                                 novels = novels,
                                 recentlyRead = recentlyRead,
+                                inProgressNovels = inProgressNovels,
+                                scanProgress = scanProgress.value,
+                                scanMessage = scanMessage.value,
                                 onNovelSelected = { novel ->
                                     lifecycleScope.launch {
                                         loadNovelDetails(novel)
                                         currentScreen.value = Screen.NovelDetail(novel)
+                                    }
+                                },
+                                onContinueReading = { novel ->
+                                    lifecycleScope.launch {
+                                        val lastProgress = db.readingProgressDao().forNovel(novel.id)
+                                        if (lastProgress != null) {
+                                            val chapter = db.chapterDao().findById(lastProgress.chapterId)
+                                            if (chapter != null) {
+                                                val chapterContent = contentRepo.getTextContent(chapter.sourcePath)
+                                                currentScreen.value = Screen.Reader(novel.id, chapter, chapterContent.body)
+                                            }
+                                        } else {
+                                            loadNovelDetails(novel)
+                                            currentScreen.value = Screen.NovelDetail(novel)
+                                        }
                                     }
                                 },
                                 onSettingsClick = { currentScreen.value = Screen.Settings }
@@ -248,6 +343,9 @@ class MainActivity : ComponentActivity() {
                                 onBack = { currentScreen.value = Screen.Library },
                                 onChapterSelected = { chapter ->
                                     lifecycleScope.launch {
+                                        // Mark novel as IN_PROGRESS when starting to read
+                                        db.novelDao().updateReadingStatus(novel.id, NovelStatus.IN_PROGRESS.name)
+                                        refreshRecentlyRead()
                                         val chapterContent = contentRepo.getTextContent(chapter.sourcePath)
                                         currentScreen.value = Screen.Reader(novel.id, chapter, chapterContent.body)
                                     }
@@ -303,7 +401,7 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }
                                 },
-                                onBack = { currentScreen.value = Screen.Library }
+                                onBack = { currentScreen.value = Screen.Home }
                             )
                         }
                     }

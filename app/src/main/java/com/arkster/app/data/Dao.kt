@@ -18,6 +18,12 @@ interface NovelDao {
 
     @Query("UPDATE novels SET page_size = :pageSize WHERE id = :novelId")
     suspend fun updatePageSize(novelId: String, pageSize: Int)
+
+    @Query("UPDATE novels SET reading_status = :status WHERE id = :novelId")
+    suspend fun updateReadingStatus(novelId: String, status: String)
+
+    @Query("SELECT * FROM novels WHERE reading_status = :status ORDER BY title")
+    suspend fun byStatus(status: String): List<NovelEntity>
 }
 
 @Dao
@@ -45,6 +51,9 @@ interface ChapterDao {
 
     @Query("SELECT * FROM chapters WHERE arc_id = :arcId ORDER BY number, title")
     suspend fun forArc(arcId: String): List<ChapterEntity>
+
+    @Query("SELECT * FROM chapters WHERE id = :chapterId")
+    suspend fun findById(chapterId: String): ChapterEntity?
 
     @Query("DELETE FROM chapters WHERE novel_id = :novelId")
     suspend fun deleteForNovel(novelId: String)
