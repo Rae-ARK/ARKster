@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -506,11 +507,25 @@ class MainActivity : ComponentActivity() {
                 // widget (status bar edge-to-edge gaps, screen transition frames, etc.) shows
                 // the underlying light window background regardless of Dark/Warm Paper being
                 // selected - the theme "not applying evenly" that users see when switching
-                // themes. Painting the root Column with the resolved background fixes that.
+                // themes. Painting the root with the resolved background fixes that.
+                //
+                // Surface (not a plain Column + .background()) is required here, not just
+                // for the paint: Surface is what sets LocalContentColor to `contentColor`
+                // for everything composed inside it. A plain Column().background(...) paints
+                // the background fine but never touches LocalContentColor, which is left at
+                // its hardcoded default (black) - so every Text()/Icon() below that doesn't
+                // pass an explicit `color` renders black regardless of theme. That was
+                // invisible in Light/Warm Paper (black-on-light already looks intentional)
+                // but unreadable in Dark theme (black-on-near-black). Routing the whole tree
+                // through Surface fixes it for every screen at once instead of patching each
+                // Text() call individually.
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = colorScheme.background,
+                    contentColor = colorScheme.onBackground
+                ) {
                 Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(colorScheme.background)
+                    modifier = Modifier.fillMaxSize()
                 ) {
                     val savedUri = prefsManager.libraryUri.collectAsState(initial = null)
 
@@ -704,6 +719,7 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                     }
+                }
                 }
 
                 when (val state = metadataSearchState.value) {

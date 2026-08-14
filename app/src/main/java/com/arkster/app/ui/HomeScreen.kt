@@ -69,11 +69,22 @@ fun HomeScreen(
     onSelectFolderClick: () -> Unit = {}
 ) {
     val searchQuery = remember { mutableStateOf("") }
-    // Keyed on `novels` (not recomputed every recomposition) so these sections don't
-    // visibly reshuffle every time e.g. the search field is typed into. In production,
-    // these would be stable lists from the DB rather than randomized locally.
-    val trendingNovels = remember(novels) { novels.shuffled().take(6) }
-    val newReleases = remember(novels) { novels.shuffled().take(4) }
+    // Snapshot `novels` (a SnapshotStateList) into a plain List before using it as a
+    // remember() key. SnapshotStateList doesn't override equals()/hashCode() - it's
+    // compared by reference, and that reference never changes as items are added to it
+    // in place. So `remember(novels) { novels.shuffled().take(6) } ` was keyed on
+    // something that looked "the same" on every recomposition even as the list's
+    // contents grew from 0 -> N during the startup scan, permanently freezing
+    // trendingNovels/newReleases at whatever `novels` happened to contain the first
+    // time HomeScreen composed - empty, if that first composition landed before the
+    // scan had added anything yet. That's the intermittent "Trending/New Releases show
+    // nothing" bug: it only reproduced when composition raced ahead of the scan.
+    // `novels.toList()` is a plain Kotlin List, which does have structural equals(), so
+    // remember() correctly recomputes only when the actual contents change - while
+    // still not reshuffling on every unrelated recomposition (e.g. typing in search).
+    val novelsSnapshot = novels.toList()
+    val trendingNovels = remember(novelsSnapshot) { novelsSnapshot.shuffled().take(6) }
+    val newReleases = remember(novelsSnapshot) { novelsSnapshot.shuffled().take(4) }
 
     Column(modifier = Modifier.fillMaxSize()) {
         // Top bar
