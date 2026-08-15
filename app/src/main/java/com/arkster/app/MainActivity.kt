@@ -31,10 +31,13 @@ import androidx.lifecycle.lifecycleScope
 import com.arkster.app.ui.ChapterEditorScreen
 import com.arkster.app.ui.AuthorPageScreen
 import com.arkster.app.ui.HomeScreen
+import com.arkster.app.ui.LegalContent
+import com.arkster.app.ui.LegalDocumentScreen
 import com.arkster.app.ui.MetadataSearchDialog
 import com.arkster.app.ui.NovelDetailScreen
 import com.arkster.app.ui.ReaderScreen
 import com.arkster.app.ui.SettingsScreen
+import com.arkster.app.ui.SplashScreen
 import com.arkster.app.ui.FictionBrowseScreen
 import com.arkster.app.data.AppDatabase
 import com.arkster.app.data.ArcEntity
@@ -66,6 +69,8 @@ sealed class Screen {
     data class Author(val authorId: String, val from: Screen) : Screen()
     object Settings : Screen()
     object FictionBrowse : Screen()
+    object PrivacyPolicy : Screen()
+    object TermsAndConditions : Screen()
 }
 
 // Drives the "Fetch info" dialog from NovelDetailScreen. Idle = dialog hidden.
@@ -123,6 +128,11 @@ class MainActivity : ComponentActivity() {
     private val authorPageAuthor = mutableStateOf<AuthorEntity?>(null)
     private val authorPageNovels = mutableStateListOf<NovelEntity>()
     private val currentScreen = mutableStateOf<Screen>(Screen.Home)
+    // Gates the branded splash (see SplashScreen.kt) shown for a moment on every
+    // cold launch before the real UI (Home, or wherever currentScreen already
+    // points) becomes visible. Lives here rather than as a Screen case since it's
+    // not a navigable destination - nothing ever sets currentScreen back to it.
+    private val showSplash = mutableStateOf(true)
     private val currentTheme = mutableStateOf(Theme.LIGHT)
     private val scanProgress = mutableStateOf<Pair<Int, Int>?>(null)  // (current, total) or null if not scanning
     private val scanMessage = mutableStateOf("")
@@ -568,6 +578,19 @@ class MainActivity : ComponentActivity() {
                 // contrast background - both unreadable. Recompute on every theme change
                 // instead of once, since currentTheme can change at runtime.
                 val view = LocalView.current
+
+                if (showSplash.value) {
+                    // Splash always renders on its own solid-black canvas (see
+                    // SplashScreen.kt) regardless of the selected reader theme, so force
+                    // light/white status bar icons here rather than deriving them from
+                    // colorScheme.background like the real content below does.
+                    SideEffect {
+                        WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = false
+                    }
+                    SplashScreen(onFinished = { showSplash.value = false })
+                    return@MaterialTheme
+                }
+
                 SideEffect {
                     WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars =
                         colorScheme.background.luminance() > 0.5f
@@ -827,7 +850,25 @@ class MainActivity : ComponentActivity() {
                                         pickFolder.launch(null)
                                     }
                                 },
+                                onPrivacyPolicy = { currentScreen.value = Screen.PrivacyPolicy },
+                                onTermsAndConditions = { currentScreen.value = Screen.TermsAndConditions },
                                 onBack = { currentScreen.value = Screen.Home }
+                            )
+                        }
+
+                        is Screen.PrivacyPolicy -> {
+                            LegalDocumentScreen(
+                                title = "Privacy Policy",
+                                sections = LegalContent.privacyPolicy,
+                                onBack = { currentScreen.value = Screen.Settings }
+                            )
+                        }
+
+                        is Screen.TermsAndConditions -> {
+                            LegalDocumentScreen(
+                                title = "Terms & Conditions",
+                                sections = LegalContent.termsAndConditions,
+                                onBack = { currentScreen.value = Screen.Settings }
                             )
                         }
                     }
