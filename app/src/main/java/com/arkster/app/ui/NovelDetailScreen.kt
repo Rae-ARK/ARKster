@@ -305,6 +305,49 @@ fun NovelDetailScreen(
                 }
             }
 
+            // Per-arc cover header - shown only when an actual arc tab (not "All
+            // Chapters") is selected. ArcEntity.coverUri has been resolved by the
+            // scanner since bugs.md Bug 3a (findCoverUri's broadened match) and has
+            // been shown in the reader's small breadcrumb thumbnail since Bug 3b, but
+            // this fiction/table-of-contents page never rendered it anywhere at all -
+            // that's the gap being closed here, not a regression of either prior fix.
+            // A missing arc cover falls back to the same 📚 placeholder
+            // NovelCoverThumb already shows for a missing novel cover, so an arc with
+            // no cover.* file just shows the placeholder instead of nothing.
+            val selectedArc = arcs.getOrNull(selectedTabIndex.intValue - 1)
+            if (selectedArc != null) {
+                item {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        NovelCoverThumb(
+                            coverUrl = selectedArc.coverUri,
+                            modifier = Modifier
+                                .width(48.dp)
+                                .height(68.dp)
+                        )
+                        Column(modifier = Modifier.padding(start = 12.dp)) {
+                            Text(
+                                selectedArc.name,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                "${chaptersInTab.size} Chapters",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 2.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
             // Pagination size controls - kept compact, tucked under the ToC header
             // rather than competing with Start Reading for top-of-page attention.
             item {
@@ -416,11 +459,16 @@ private fun NovelCoverThumb(
         contentAlignment = Alignment.Center
     ) {
         if (coverUrl != null) {
+            // Fill whatever size the caller's `modifier` already established on the
+            // outer Box, rather than a hardcoded 136dp height - this composable is
+            // reused at a smaller size for the per-arc cover header below, and a fixed
+            // height here would have clipped/overflowed at that size instead of
+            // actually resizing.
             AsyncImage(
                 model = coverUrl,
                 contentDescription = null,
                 contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                modifier = Modifier.fillMaxWidth().height(136.dp)
+                modifier = Modifier.fillMaxSize()
             )
         } else {
             Text("📚", fontSize = 32.sp)

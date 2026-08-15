@@ -231,3 +231,126 @@ Still open:
 ### Files touched this stage
 - `app/src/main/java/com/arkster/app/ui/ReaderScreen.kt` — `coverUri` param, `ReaderCoverThumbnail`
 - `app/src/main/java/com/arkster/app/MainActivity.kt` — resolves `readerCoverUri` and passes it through
+
+---
+
+## Stage 4 status
+
+Fixed:
+
+- **Bug 2 follow-up — closing/bonus content still sorting to the bottom of
+  the whole novel, not the end of its own arc.** Reported again after
+  Stage 2's fix shipped: an arc's Afterword-type file (whatever marker or
+  keyword puts it at `sort_tier` 1/2) was landing at the very bottom of the
+  novel's full chapter list instead of right after that arc's own last
+  chapter.
+
+  **Root cause:** Stage 2's fix (`ORDER BY sort_tier, number, title` on
+  `ChapterDao.forNovel`) sorts `sort_tier` *globally across the entire
+  novel* - it has no idea arcs exist. So every tier-0 (regular) chapter
+  from *every* arc sorts before *any* tier-1/2 chapter from *any* arc, and
+  only then do the tier-1/2 chapters get ordered among themselves. An early
+  arc's Afterword (tier 2) therefore sorts after a later arc's regular
+  chapters, landing at the bottom of the whole book rather than the end of
+  its own arc.
+
+  This didn't show up in the per-arc detail tab (`NovelDetailScreen`
+  filters the same flat list down to one `arcId`, and filtering preserves
+  relative order - which happens to still be correct *within* one arc's
+  subset, since that arc's own tier-0 items are always ahead of its own
+  tier-2 items in the global order too). It only surfaces in "All
+  Chapters" and in chapter-to-chapter Previous/Next navigation
+  (`MainActivity`'s Previous/Next resolution walks this same flat
+  `chapters` list - see `AUTHOR_PAGE_AND_CHAPTER_REDESIGN.md` Stage 3),
+  both of which showed the bug exactly as reported.
+
+  **Fix:** `ChapterDao.forNovel` now groups by arc *before* applying
+  `sort_tier`/`number`/`title` - root-level chapters (`arc_id IS NULL`,
+  i.e. the novel folder itself, always scanned before any arc subfolder -
+  see `ScannerImpl.scanChaptersForNovel`) come first, then each arc in its
+  own `ArcEntity.position` order, and only *within* that grouping does the
+  tier/number/title tie-break apply. A `LEFT JOIN arcs` supplies
+  `arcs.position` for the ordering; the query still projects only
+  `chapters.*` so it maps straight to `ChapterEntity` as before. No schema
+  change, no migration - this was purely a query-ordering bug.
+  `ChapterDao.forArc` was already correct (it only ever queries one arc at
+  a time, so there was nothing to group) and is unchanged.
+
+Still open:
+
+- **Bug 1** — still needs the screenshot/repro detail from the original
+  report; not addressed in this or any prior stage.
+
+### Files touched this stage
+- `app/src/main/java/com/arkster/app/data/Dao.kt` — `ChapterDao.forNovel` now arc-grouped before tier/number/title
+
+---
+
+## Stage 5 status
+
+Fixed:
+
+- **Arc folder sort order.** Reported: arcs weren't listing in their
+  intended order at all (independent of the chapter-tier bug above - this
+  is about the *arcs themselves*, e.g. tabs reading "Arc 2, Arc 1, Arc 3").
+
+  **Root cause:** `ScannerImpl.scanChaptersForNovel` builds `arcFolders`
+  straight from `novelFolder.listFiles()`, `.filter`ed down to folders
+  matching `ARC_PATTERNS`, then assigns `ArcEntity.position = idx` off
+  that filtered list's enumeration order. SAF's `DocumentFile.listFiles()`
+  makes no ordering guarantee at all - most providers return entries in
+  filesystem/creation order, not alphabetically - so `position` was
+  effectively whatever order the storage provider happened to return
+  folders in, not the arc's actual numeric order.
+
+  **Fix:** `arcFolders` is now explicitly sorted before `position` is
+  assigned, using a new `arcSortNumber()` helper that extracts the numeric
+  group `ARC_PATTERNS` already captures (e.g. `2` out of `"Arc 2 -
+  Whatever"`) and sorts on that *numerically* - not lexicographically,
+  since a plain string sort would still get `"Arc 10"` before `"Arc 2"`
+  wrong the same way the missing sort did. A folder that matches an arc
+  pattern but has no number after it (just `"Arc"`/`"Volume"` alone) falls
+  back to sorting after every numbered arc, by name. `CURRENT_SCAN_VERSION`
+  bumped 5 → 6: `scanChaptersForNovel` returns early on an unchanged
+  fingerprint *before* it ever reaches arc detection, so an already-scanned
+  novel with arcs stored in the old, possibly-wrong order needed one more
+  forced full rescan to self-correct rather than silently keeping stale
+  positions forever.
+
+- **Arc covers not appearing anywhere on the fiction page.** Reported as
+  "I thought I fixed it" - understandably, since Bug 3a above *did* fix
+  arc cover resolution during scanning, and Bug 3b *did* wire
+  `ArcEntity.coverUri` into the reader page's small breadcrumb thumbnail.
+  Neither of those touches the fiction/table-of-contents page
+  (`NovelDetailScreen`) at all - it was never wired to show an arc's cover
+  anywhere, tabs included, so a correctly-resolved `ArcEntity.coverUri`
+  still had nowhere to render on this specific screen. Not a regression of
+  either prior fix - a gap neither one was scoped to close.
+
+  **Fix:** `NovelDetailScreen` now shows a small cover thumbnail + arc name
+  + chapter count header whenever an actual arc tab (not "All Chapters")
+  is selected, using the same `NovelCoverThumb` composable and 📚
+  placeholder-on-missing-cover behavior the novel-level header above it
+  already uses. Reusing that composable surfaced a latent sizing bug in it
+  worth calling out separately: its `AsyncImage` hardcoded
+  `.fillMaxWidth().height(136.dp)` regardless of the *caller's* modifier,
+  which happened to be invisible while the composable was only ever used
+  at exactly that size (the novel header) - reused at the arc header's
+  smaller 48x68dp size, the image would have overflowed/clipped inside a
+  much smaller Box. Changed to `.fillMaxSize()` so it actually honors
+  whatever size the caller passes in.
+
+- **"All Chapters" ordering (arc 1's chapters, then arc 2's, then arc
+  3's, ...).** No new code beyond the two fixes above plus Stage 4's -
+  this is exactly what falls out once arc `position` is assigned correctly
+  (this stage) and `ChapterDao.forNovel` groups by that position before
+  applying tier/number/title within each group (Stage 4). Verified by
+  re-reading both queries together rather than re-testing in isolation:
+  root-level chapters (no arc) first, then each arc's own chapters in
+  `position` order, tier/number/title breaking ties only within a single
+  arc's block - never spilling into a neighboring arc the way Stage 4's
+  bug did.
+
+### Files touched this stage
+- `app/src/main/java/com/arkster/app/data/ScannerImpl.kt` — `arcFolders` sorted by `arcSortNumber()` before `position` assignment; `CURRENT_SCAN_VERSION` 5 → 6
+- `app/src/main/java/com/arkster/app/ui/NovelDetailScreen.kt` — per-arc cover header; `NovelCoverThumb` sizing fix (`fillMaxSize()` instead of a hardcoded height)

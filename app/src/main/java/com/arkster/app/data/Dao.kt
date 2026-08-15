@@ -89,10 +89,34 @@ interface ChapterDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(chapter: ChapterEntity)
 
-    // sort_tier first so bonus (1) and closing (2) content always lands after every
-    // regular chapter (0) in the same folder, regardless of number/title - see
-    // bugs.md Bug 2. number/title remain the tie-break within a tier, same as before.
-    @Query("SELECT * FROM chapters WHERE novel_id = :novelId ORDER BY sort_tier, number, title")
+    // Bug 2 follow-up: the original fix (`ORDER BY sort_tier, number, title`, no arc
+    // grouping) sorted sort_tier *globally across the whole novel* rather than within
+    // each arc/folder. That meant a closing/bonus chapter (tier 1/2) in an early arc
+    // sorted after every regular (tier 0) chapter in every *later* arc too - e.g. Arc
+    // 1's Afterword landed after all of Arc 2's and Arc 3's regular chapters, at the
+    // very bottom of the novel, instead of right after Arc 1's own last chapter. The
+    // per-arc detail tab happened to look correct (it filters this same list down to
+    // one arc, which preserves relative order within that arc), but "All Chapters"
+    // and chapter-to-chapter Previous/Next navigation (both driven by this flat list -
+    // see MainActivity.loadNovelDetails) showed the bug.
+    //
+    // Fix: group by arc first - root-level chapters (arc_id IS NULL, i.e. the novel
+    // folder itself, always scanned before any arc subfolder - see
+    // ScannerImpl.scanChaptersForNovel) come first, then each arc in its own
+    // ArcEntity.position order - and only *within* that grouping do sort_tier/number/
+    // title decide order, so bonus/closing content still lands after every regular
+    // chapter but only within its own arc, never spilling into a later arc's block.
+    @Query("""
+        SELECT chapters.* FROM chapters
+        LEFT JOIN arcs ON chapters.arc_id = arcs.id
+        WHERE chapters.novel_id = :novelId
+        ORDER BY
+            CASE WHEN chapters.arc_id IS NULL THEN 0 ELSE 1 END,
+            arcs.position,
+            chapters.sort_tier,
+            chapters.number,
+            chapters.title
+    """)
     suspend fun forNovel(novelId: String): List<ChapterEntity>
 
     @Query("SELECT * FROM chapters WHERE arc_id = :arcId ORDER BY sort_tier, number, title")

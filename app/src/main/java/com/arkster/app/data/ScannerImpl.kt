@@ -26,7 +26,13 @@ class ScannerImpl(private val context: Context) {
         // bugs.md Bug 2) - bumped so every already-scanned novel gets reparsed once
         // and picks up the new tiers, instead of sitting unclassified until its next
         // unrelated rescan.
-        private const val CURRENT_SCAN_VERSION = 5
+        // v6: arc folders are now sorted numerically before ArcEntity.position is
+        // assigned (see arcSortNumber/bugs.md Stage 5) instead of trusting SAF
+        // listFiles() order. scanChaptersForNovel returns early on an unchanged
+        // fingerprint *before* ever reaching arc detection, so an already-scanned
+        // novel with arcs stored in the old, possibly-wrong order would never
+        // self-correct without this bump forcing one more full rescan.
+        private const val CURRENT_SCAN_VERSION = 6
 
         private val ARC_PATTERNS = listOf(
             Regex("^(?:Arc|Volume|Book|Part)\\s*(\\d+)?", RegexOption.IGNORE_CASE),
@@ -185,9 +191,28 @@ class ScannerImpl(private val context: Context) {
         // the source file itself is gone.
 
         // Detect arcs (subfolders matching arc patterns) and upsert them in place.
+        //
+        // listFiles() on a SAF DocumentFile makes no ordering guarantee at all - most
+        // providers return entries in filesystem/creation order, not alphabetically -
+        // so without an explicit sort, "Arc 2 - Whatever" could easily enumerate before
+        // "Arc 1 - Whatever". ArcEntity.position (assigned by index right below) then
+        // bakes that arbitrary order in permanently, which is what was surfacing as
+        // arcs listed out of order in the fiction page's tabs/table of contents. Sort
+        // explicitly by the numeric arc index ARC_PATTERNS already captures (e.g. "2"
+        // out of "Arc 2 - Whatever"), numerically rather than lexicographically so
+        // "Arc 10" doesn't sort before "Arc 2" - a plain string sort would get that
+        // wrong the same way the old unsorted listFiles() order could. Folders that
+        // match an arc pattern but have no captured number (just "Arc" / "Volume" with
+        // nothing after it) fall back to sorting after every numbered arc, by name.
         onProgress("Detecting arcs...")
         val arcFolders = novelFolder.listFiles()
             .filter { it.isDirectory && isArcFolder(it.name ?: "") }
+            .sortedWith(
+                compareBy(
+                    { arcSortNumber(it.name ?: "") ?: Int.MAX_VALUE },
+                    { it.name ?: "" }
+                )
+            )
         val arcs = mutableMapOf<String, ArcEntity>()
         val seenArcIds = mutableSetOf<String>()
         arcFolders.forEachIndexed { idx, arcFolder ->
@@ -260,6 +285,19 @@ class ScannerImpl(private val context: Context) {
 
     private fun isArcFolder(folderName: String): Boolean {
         return ARC_PATTERNS.any { it.containsMatchIn(folderName) }
+    }
+
+    // Extracts the numeric arc index ARC_PATTERNS captures (e.g. 2 from "Arc 2 -
+    // Whatever"/"Volume 2"/"卷2"), trying each pattern in order and returning the
+    // first captured number found. Null when the folder matches an arc pattern but
+    // has no number after it (e.g. a bare "Arc" folder) - callers sort those last.
+    private fun arcSortNumber(folderName: String): Int? {
+        for (pattern in ARC_PATTERNS) {
+            val match = pattern.find(folderName) ?: continue
+            val number = match.groupValues.getOrNull(1)?.toIntOrNull()
+            if (number != null) return number
+        }
+        return null
     }
 
     private data class ParsedChapter(val number: Int?, val title: String, val sortTier: Int)
