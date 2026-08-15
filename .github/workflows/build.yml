@@ -34,7 +34,15 @@ jobs:
       run: chmod +x ./gradlew
 
     - name: Build with Gradle
-      run: ./gradlew assembleDebug --stacktrace
+      # Piped through tee so the full compiler/Gradle output survives into a file we
+      # can upload on failure - previously this only ever went to the Actions log
+      # itself, which requires a signed-in GitHub session to view, and the "Upload
+      # Build Logs on failure" step below only grabbed build/reports and
+      # build/outputs/logs, neither of which ever contains this step's stdout. The
+      # default bash shell GitHub Actions uses for `run:` already sets `-o pipefail`,
+      # so piping to tee here does NOT swallow gradlew's real exit code - the step
+      # still fails correctly if the build fails.
+      run: ./gradlew assembleDebug --stacktrace 2>&1 | tee build-output.log
 
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4
@@ -49,5 +57,6 @@ jobs:
       with:
         name: build-logs
         path: |
+          build-output.log
           **/build/reports/
           **/build/outputs/logs/
