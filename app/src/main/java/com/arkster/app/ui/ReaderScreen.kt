@@ -112,6 +112,12 @@ fun ReaderScreen(
     val lineHeight = remember { mutableFloatStateOf(1.8f) }
     val readingMode = remember { mutableStateOf(readingModeFor(appTheme)) }
     val showControls = remember { mutableStateOf(true) }
+    // Separate from showControls: showControls is the tap-anywhere immersive toggle
+    // for the top bar + progress readout, but font/spacing/mode were only reachable
+    // by first being in non-immersive mode. Royal Road instead exposes an explicit,
+    // always-visible "Reader Preferences" pill so the settings are discoverable
+    // without depending on the tap gesture at all.
+    val showPreferences = remember { mutableStateOf(false) }
     val scrollState = rememberScrollState()
 
     fun currentProgress(): Float {
@@ -277,14 +283,19 @@ fun ReaderScreen(
             )
         }
 
-        // Bottom controls panel
+        // Bottom controls panel: reading progress readout stays tied to the immersive
+        // tap-to-show/hide gesture (showControls), same as the top bar. The Reader
+        // Preferences pill below it is intentionally NOT gated on showControls -
+        // it needs to stay reachable even in immersive mode, since that's the whole
+        // point of making it an explicit button instead of only living behind the
+        // tap gesture.
         if (showControls.value) {
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .background(backgroundColor)
-                    .padding(16.dp)
+                    .padding(top = 16.dp, start = 16.dp, end = 16.dp)
             ) {
                 // Reading progress
                 Box(
@@ -301,7 +312,28 @@ fun ReaderScreen(
                         color = textColor.copy(alpha = 0.7f)
                     )
                 }
+            }
+        }
 
+        // Reader Preferences: an explicit, always-visible pill (Royal Road-style)
+        // that opens the font/spacing/mode panel. Unlike the block above, this isn't
+        // gated on showControls, so it stays reachable even when the top bar and
+        // progress readout are hidden in immersive mode.
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .padding(bottom = 16.dp)
+        ) {
+            if (showPreferences.value) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(backgroundColor)
+                        .padding(16.dp)
+                ) {
                 // Font size control
                 Row(
                     modifier = Modifier
@@ -407,6 +439,36 @@ fun ReaderScreen(
                                 }
                             }
                         }
+                    }
+                }
+                }
+            }
+
+            // The pill itself - Royal Road-style rounded button, centered, always on
+            // top of whatever else is showing. Toggles the panel above rather than
+            // navigating anywhere, so it stays a single persistent affordance instead
+            // of disappearing once tapped.
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                Surface(
+                    modifier = Modifier.clickable { showPreferences.value = !showPreferences.value },
+                    color = MaterialTheme.colorScheme.primary,
+                    shape = RoundedCornerShape(50),
+                    shadowElevation = 4.dp
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text("Aa", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onPrimary)
+                        Text(
+                            "Reader Preferences",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
                     }
                 }
             }

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Matches Theme.LIGHT's default Material3 primary (#6750A4) used elsewhere in
+         the app, so the launcher icon reads as part of the same purple identity
+         rather than an arbitrary color picked in isolation. -->
+    <color name="ic_launcher_background">#6750A4</color>
+</resources>
