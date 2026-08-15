@@ -338,7 +338,13 @@ fun NovelDetailScreen(
                         }
                         itemsIndexed(arcs) { index, arc ->
                             ArcTabCard(
-                                coverUrl = arc.coverUri,
+                                // Arc cover first; if this arc's folder had no cover.* file,
+                                // fall back to the fiction's own cover rather than dropping
+                                // straight to the placeholder - only when neither exists does
+                                // ArcTabCard/NovelCoverThumb show the 📚 emoji. Same order as
+                                // the reader screen's readerCoverUri resolution in
+                                // MainActivity (arc -> fiction -> null, bugs.md Bug 3b).
+                                coverUrl = arc.coverUri ?: novel.coverUri ?: novel.remoteCoverUrl,
                                 label = arc.name,
                                 count = chapterCountByArcId[arc.id] ?: 0,
                                 selected = selectedTabIndex.intValue == index + 1,

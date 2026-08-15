@@ -43,5 +43,5 @@ Push to `main` or `develop` branches to trigger automatic APK builds. Artifacts 
 - **Graceful degradation**: Auto-generated covers, best-effort title parsing, user override editor.
 
 ## License
-Unspecified (add a LICENSE file if publishing).
+GPLv3
 
