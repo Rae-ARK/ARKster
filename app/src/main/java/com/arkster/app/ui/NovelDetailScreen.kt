@@ -11,15 +11,18 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoStories
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
@@ -29,6 +32,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
@@ -79,18 +83,29 @@ fun NovelDetailScreen(
     val currentPage = remember { mutableIntStateOf(0) }
     val tabs = listOf("All Chapters") + arcs.map { it.name }
     var descriptionExpanded by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
 
-    val chaptersInTab = when (selectedTabIndex.intValue) {
+    val chaptersInArc = when (selectedTabIndex.intValue) {
         0 -> chapters
         else -> {
             val arcId = arcs.getOrNull(selectedTabIndex.intValue - 1)?.id
             chapters.filter { it.arcId == arcId }
         }
     }
+    // Search narrows within whatever's already picked by the arc tab - matching
+    // Royal Road's ToC search, which filters the visible list rather than the
+    // whole fiction. Title-only match (chapter numbers aren't meaningful search
+    // terms here), case-insensitive.
+    val chaptersInTab = if (searchQuery.isBlank()) {
+        chaptersInArc
+    } else {
+        chaptersInArc.filter { it.title.contains(searchQuery, ignoreCase = true) }
+    }
 
-    // Switching tabs (or resizing) changes the item count under the current page, so
-    // reset back to page 1 rather than showing a now-meaningless page index.
-    LaunchedEffect(selectedTabIndex.intValue, pageSize.intValue) {
+    // Switching tabs, resizing, or searching changes the item count under the
+    // current page, so reset back to page 1 rather than showing a now-meaningless
+    // page index.
+    LaunchedEffect(selectedTabIndex.intValue, pageSize.intValue, searchQuery) {
         currentPage.intValue = 0
     }
 
@@ -349,6 +364,30 @@ fun NovelDetailScreen(
                 }
             }
 
+            // Chapter search - the single biggest ToC gap vs. Royal Road for any
+            // fiction with more than a screenful of chapters. Filters the currently
+            // selected arc tab's list by title; doesn't touch pageSize/currentPage
+            // directly, those reset via the LaunchedEffect above.
+            item {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    placeholder = { Text("Search chapters...") },
+                    singleLine = true,
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(Icons.Default.Clear, contentDescription = "Clear search")
+                            }
+                        }
+                    }
+                )
+            }
+
             // Pagination size controls - kept compact, tucked under the ToC header
             // rather than competing with Start Reading for top-of-page attention.
             item {
@@ -385,8 +424,17 @@ fun NovelDetailScreen(
 
             // Chapter list - flat rows with a hairline divider between them, closer to
             // Royal Road's dense chapter table than the previous per-row Card look.
-            items(chaptersToShow) { chapter ->
-                Column {
+            // Zebra striping and sortTier-based Bonus/Extra tags make the ordering
+            // fix from bugs.md Bug 2 visible/legible instead of just "correct but
+            // silent" - a reader can now actually see why an interlude sorts where
+            // it does relative to numbered chapters.
+            itemsIndexed(chaptersToShow) { index, chapter ->
+                Column(
+                    modifier = Modifier.background(
+                        if (index % 2 == 1) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                        else MaterialTheme.colorScheme.surface
+                    )
+                ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -394,14 +442,31 @@ fun NovelDetailScreen(
                             .padding(horizontal = 16.dp, vertical = 14.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            "${chapter.number ?: ""} ${chapter.title}".trim(),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.weight(1f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (chapter.number != null) {
+                                    Text(
+                                        "${chapter.number}",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(end = 8.dp)
+                                    )
+                                }
+                                when (chapter.sortTier) {
+                                    1 -> ChapterTag("Bonus")
+                                    2 -> ChapterTag("Extra")
+                                }
+                            }
+                            Text(
+                                chapter.title,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(top = 2.dp)
+                            )
+                        }
                         if (chapter.id in overriddenChapterIds) {
                             Text(
                                 "Edited",
@@ -412,6 +477,19 @@ fun NovelDetailScreen(
                         }
                     }
                     Divider()
+                }
+            }
+
+            // Empty state for a search that matched nothing, rather than silently
+            // showing zero rows with no explanation.
+            if (chaptersToShow.isEmpty() && searchQuery.isNotBlank()) {
+                item {
+                    Text(
+                        "No chapters match \"$searchQuery\"",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 24.dp)
+                    )
                 }
             }
 
@@ -445,6 +523,27 @@ fun NovelDetailScreen(
                 }
             }
         }
+    }
+}
+
+// Small pill for a chapter's sortTier - "Bonus" (interludes/omakes/side stories)
+// or "Extra" (afterwords/author's notes). Kept visually quiet (surfaceVariant,
+// no border) since these appear on nearly every page and shouldn't compete with
+// the chapter title for attention.
+@Composable
+private fun ChapterTag(label: String) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(MaterialTheme.colorScheme.tertiaryContainer)
+            .padding(horizontal = 6.dp, vertical = 2.dp)
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onTertiaryContainer,
+            fontSize = 10.sp
+        )
     }
 }
 
