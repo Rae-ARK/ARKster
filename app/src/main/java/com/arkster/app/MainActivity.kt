@@ -151,6 +151,13 @@ class MainActivity : ComponentActivity() {
         // deleted folders, etc), but this wraps the whole thing defensively too - a
         // stray DB exception here should never be allowed to crash the app on startup;
         // worst case the user sees a stale/partial library and can retry from Settings.
+        // Tracks which novel IDs this scan pass actually found, so onScanCompleted below
+        // can remove DB rows (and their cascaded arcs/chapters/overrides/progress) for
+        // novels whose folder is genuinely gone - see bugs.md Bug 4. A novel that hits
+        // the catch block below and never reaches the upsert is deliberately NOT added
+        // here, matching the same accepted tradeoff scanChaptersForNovel's
+        // seenChapterIds/seenArcIds already make for a single skipped item.
+        val seenNovelIds = mutableSetOf<String>()
         try {
             scanner.scanRoot(treeUri,
                 onDiscovered = { scanned, novelFolder ->
@@ -199,6 +206,7 @@ class MainActivity : ComponentActivity() {
                             )
                         } else scanned
                         db.novelDao().upsert(novel)
+                        seenNovelIds.add(novel.id)
                         withContext(Dispatchers.Main) {
                             val idx = novels.indexOfFirst { it.id == novel.id }
                             if (idx >= 0) novels[idx] = novel else novels.add(novel)
@@ -225,6 +233,27 @@ class MainActivity : ComponentActivity() {
                     discoveredAuthors.forEach { db.authorDao().upsert(it) }
                     db.authorDao().all().filter { it.id !in seenIds }.forEach { stale ->
                         db.authorDao().delete(stale.id)
+                    }
+                },
+                onScanCompleted = {
+                    // See bugs.md Bug 4: this used to be a `novels.clear()` at the call
+                    // site in Settings' onRescan, which cleared the UI list *before*
+                    // scanning rather than reconciling it against a completed scan. That
+                    // meant every manual rescan flashed the whole library to empty while
+                    // novels trickled back in one at a time, and - worse - any novel this
+                    // particular pass failed to rediscover (a transient SAF hiccup, the
+                    // user backing out mid-scan, etc) stayed permanently missing from the
+                    // UI even though its row was never touched in the DB. Doing the
+                    // removal here instead, keyed off seenNovelIds and gated on a
+                    // genuine onScanCompleted (never fired on an aborted/partial scan -
+                    // see ScannerImpl.scanRoot), means the UI only ever loses a novel
+                    // when this scan actually confirmed its folder is gone.
+                    val staleIds = db.novelDao().all().map { it.id }.filter { it !in seenNovelIds }.toSet()
+                    staleIds.forEach { db.novelDao().delete(it) }
+                    if (staleIds.isNotEmpty()) {
+                        withContext(Dispatchers.Main) {
+                            novels.removeAll { it.id in staleIds }
+                        }
                     }
                 },
                 onProgress = { current, total, message ->
@@ -773,7 +802,12 @@ class MainActivity : ComponentActivity() {
                                     val currentUri = savedUri.value
                                     if (currentUri != null) {
                                         lifecycleScope.launch {
-                                            novels.clear()
+                                            // No novels.clear() here - see bugs.md Bug 4.
+                                            // startScan's onScanCompleted now reconciles
+                                            // stale novels against the DB once the scan
+                                            // actually finishes, instead of blanking the
+                                            // visible library up front and hoping the scan
+                                            // fully repopulates it.
                                             startScan(Uri.parse(currentUri))
                                         }
                                     } else {

@@ -75,6 +75,15 @@ class ScannerImpl(private val context: Context) {
         // the actual DB upsert/stale-removal themselves, same "ScannerImpl never holds
         // a db reference in scanRoot" style already used for onDiscovered above.
         onAuthorsDiscovered: suspend (List<AuthorEntity>) -> Unit = {},
+        // Fired exactly once, only after the full children loop below has finished a
+        // genuine, uninterrupted pass (i.e. NOT on the early SecurityException/
+        // "folder no longer accessible" returns above it, and not per-child - a single
+        // child throwing is caught and skipped without aborting the whole loop). This
+        // is the caller's cue that it's safe to reconcile "which novels still exist"
+        // against the DB - see MainActivity.startScan's seenNovelIds. Firing this on a
+        // partial/aborted scan would let a transient SAF error wipe the entire library
+        // instead of just leaving it stale until the next successful scan.
+        onScanCompleted: suspend () -> Unit = {},
         onProgress: suspend (current: Int, total: Int, message: String) -> Unit = { _, _, _ -> }
     ) = withContext(Dispatchers.IO) {
         // Everything below touches the Storage Access Framework, which throws
@@ -153,6 +162,7 @@ class ScannerImpl(private val context: Context) {
                     }
                 }
             }
+            onScanCompleted()
             onProgress(total, total, "Scan complete")
         } catch (e: SecurityException) {
             onProgress(0, 0, "Lost access to the library folder - please reselect it")

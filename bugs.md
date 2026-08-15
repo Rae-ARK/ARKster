@@ -354,3 +354,72 @@ Fixed:
 ### Files touched this stage
 - `app/src/main/java/com/arkster/app/data/ScannerImpl.kt` — `arcFolders` sorted by `arcSortNumber()` before `position` assignment; `CURRENT_SCAN_VERSION` 5 → 6
 - `app/src/main/java/com/arkster/app/ui/NovelDetailScreen.kt` — per-arc cover header; `NovelCoverThumb` sizing fix (`fillMaxSize()` instead of a hardcoded height)
+
+---
+
+## Bug 4 — Manual rescan can make novels disappear from the library
+
+**Status: root-caused and fixed.**
+
+**Symptom:** Tapping "Rescan Library" in Settings could make the whole
+library flash empty while it re-populated, and in some cases a novel would
+stay missing from the list afterward even though nothing about that
+novel's folder had actually changed.
+
+**Root cause:**
+
+- `SettingsScreen`'s `onRescan` called `novels.clear()` (`MainActivity.kt`,
+  in the `Screen.Settings` composable) immediately before `startScan()`,
+  wiping the in-memory `novels` list up front rather than reconciling it
+  against a completed scan.
+- `novels` is never loaded from the DB directly anywhere else in the app —
+  it's built *only* by `scanRoot`'s `onDiscovered` callback firing once per
+  novel folder found. So clearing it first meant the Home screen showed an
+  empty library until each novel trickled back in asynchronously.
+- Worse: `scanRoot`'s per-child loop (`ScannerImpl.kt`) already
+  catches and skips (rather than propagates) an exception for any single
+  novel folder it can't read, via `onProgress("Skipped $name: ...")`. A
+  novel skipped this way never calls `onDiscovered`, so after a
+  `novels.clear()` it simply never comes back — permanently missing from
+  the UI after one transient SAF hiccup during a rescan, even though its
+  row and all its chapters/arcs were still completely intact in the DB.
+- Unlike arcs, chapters, and authors — which all already have a
+  diff-and-remove pattern (`seenArcIds`/`seenChapterIds` in
+  `scanChaptersForNovel`, `seenIds` in `onAuthorsDiscovered`) — novels
+  themselves had no equivalent stale-removal step against the DB at all.
+  `novels.clear()` in Settings was a UI-only stand-in for that missing
+  piece, and didn't actually delete anything from the DB either: a
+  genuinely deleted novel's row (and its arcs/chapters/chapter_overrides/
+  reading_progress/scan_fingerprint rows) would sit orphaned forever.
+
+**Fix:**
+
+- `ScannerImpl.scanRoot` now takes an `onScanCompleted` callback, fired
+  exactly once, only after the children loop finishes a full,
+  uninterrupted pass — never on the early `SecurityException`/"folder no
+  longer accessible" returns, and never from a single skipped child. This
+  is the signal that it's actually safe to reconcile "which novels still
+  exist" against the DB.
+- `MainActivity.startScan` now tracks `seenNovelIds` as novels are
+  successfully upserted during the scan, and in `onScanCompleted` diffs
+  that against `db.novelDao().all()`, deleting any DB row not seen (which
+  cascades to that novel's arcs/chapters/chapter_overrides/reading_progress/
+  scan_fingerprint rows via their existing `onDelete = CASCADE` foreign
+  keys — see `Entities.kt`) and removing the same IDs from the in-memory
+  `novels` list. Added `NovelDao.delete(novelId)` to support this.
+- Removed the `novels.clear()` call from Settings' `onRescan` entirely —
+  the list is now only ever trimmed by this reconciliation step, after a
+  scan has actually confirmed a novel's folder is gone, not preemptively.
+
+**Accepted tradeoff:** same as the existing arc/chapter pattern — a novel
+folder that fails to read for a transient reason during one scan pass is
+still treated as "gone" and removed, since `seenNovelIds` only gets an ID
+added on a successful upsert. This mirrors `seenChapterIds`/`seenArcIds`'s
+existing behavior rather than introducing new risk; it just no longer adds
+the *additional* failure mode of clearing everything before the scan even
+starts.
+
+### Files touched this stage
+- `app/src/main/java/com/arkster/app/data/ScannerImpl.kt` — new `onScanCompleted` param on `scanRoot`, fired after a genuine full pass
+- `app/src/main/java/com/arkster/app/data/Dao.kt` — new `NovelDao.delete(novelId)`
+- `app/src/main/java/com/arkster/app/MainActivity.kt` — `seenNovelIds` tracking + reconciliation in `startScan`'s `onScanCompleted`; removed `novels.clear()` from Settings' `onRescan`

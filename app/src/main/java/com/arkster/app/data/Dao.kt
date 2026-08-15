@@ -13,6 +13,12 @@ interface NovelDao {
     @Query("SELECT * FROM novels ORDER BY title")
     suspend fun all(): List<NovelEntity>
 
+    // Cascades to arcs/chapters/chapter_overrides/reading_progress/scan_fingerprints
+    // via their onDelete=CASCADE foreign keys (see Entities.kt) - a single call here
+    // cleans up everything belonging to this novel, no separate per-table deletes needed.
+    @Query("DELETE FROM novels WHERE id = :novelId")
+    suspend fun delete(novelId: String)
+
     @Query("SELECT * FROM novels WHERE id = :novelId")
     suspend fun findById(novelId: String): NovelEntity?
 
