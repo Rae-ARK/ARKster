@@ -34,6 +34,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -119,6 +120,19 @@ fun ReaderScreen(
     // without depending on the tap gesture at all.
     val showPreferences = remember { mutableStateOf(false) }
     val scrollState = rememberScrollState()
+
+    // ReaderScreen's call site in MainActivity doesn't change when Previous/Next swaps
+    // to a new chapter (it's still the same `is Screen.Reader ->` branch, just
+    // re-invoked with a new Screen.Reader instance) - so `remember`-backed state above,
+    // including scrollState, survives across chapters rather than being torn down and
+    // recreated. That's the right behavior for fontSize/lineHeight/readingMode (a
+    // reading preference shouldn't reset every chapter), but scroll position is
+    // per-chapter: without this, landing on a new chapter kept whatever scroll offset
+    // the previous chapter was left at instead of opening at the top. Reset explicitly
+    // whenever the chapter actually changes.
+    LaunchedEffect(chapter.id) {
+        scrollState.scrollTo(0)
+    }
 
     fun currentProgress(): Float {
         val max = scrollState.maxValue
@@ -283,48 +297,55 @@ fun ReaderScreen(
             )
         }
 
-        // Bottom controls panel: reading progress readout stays tied to the immersive
-        // tap-to-show/hide gesture (showControls), same as the top bar. The Reader
-        // Preferences pill below it is intentionally NOT gated on showControls -
-        // it needs to stay reachable even in immersive mode, since that's the whole
-        // point of making it an explicit button instead of only living behind the
-        // tap gesture.
-        if (showControls.value) {
-            Column(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .background(backgroundColor)
-                    .padding(top = 16.dp, start = 16.dp, end = 16.dp)
-            ) {
-                // Reading progress
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 12.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    val progressPercent = (currentProgress() * 100).toInt()
-                    val currentPage = (currentProgress() * estimatedTotalPages).toInt().coerceIn(1, estimatedTotalPages)
-                    Text(
-                        "$progressPercent% • page $currentPage of $estimatedTotalPages",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = textColor.copy(alpha = 0.7f)
-                    )
-                }
-            }
-        }
-
-        // Reader Preferences: an explicit, always-visible pill (Royal Road-style)
-        // that opens the font/spacing/mode panel. Unlike the block above, this isn't
-        // gated on showControls, so it stays reachable even when the top bar and
-        // progress readout are hidden in immersive mode.
+        // Bottom controls: the reading-progress readout (gated on showControls, same as
+        // the top bar) and the Reader Preferences pill (always visible - see its own
+        // comment below) used to be two SEPARATE Columns each independently
+        // align(Alignment.BottomCenter)'d against this Box. Two children both anchored
+        // to BottomCenter overlap at the same position rather than stacking, so in
+        // non-immersive mode (both visible at once) the pill - composed second, so on
+        // top in z-order - was drawn directly over the progress readout and hid it.
+        // Wrapping both in one shared BottomCenter Column makes them lay out in order
+        // (progress readout above, pill below) instead of on top of each other.
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .padding(bottom = 16.dp)
         ) {
+            // Reading progress readout stays tied to the immersive tap-to-show/hide
+            // gesture (showControls), same as the top bar.
+            if (showControls.value) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(backgroundColor)
+                        .padding(top = 16.dp, start = 16.dp, end = 16.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        val progressPercent = (currentProgress() * 100).toInt()
+                        val currentPage = (currentProgress() * estimatedTotalPages).toInt().coerceIn(1, estimatedTotalPages)
+                        Text(
+                            "$progressPercent% • page $currentPage of $estimatedTotalPages",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = textColor.copy(alpha = 0.7f)
+                        )
+                    }
+                }
+            }
+
+            // Reader Preferences: an explicit, always-visible pill (Royal Road-style)
+            // that opens the font/spacing/mode panel. Unlike the block above, this isn't
+            // gated on showControls, so it stays reachable even when the top bar and
+            // progress readout are hidden in immersive mode.
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp)
+            ) {
             if (showPreferences.value) {
                 Column(
                     modifier = Modifier
@@ -473,6 +494,7 @@ fun ReaderScreen(
                 }
             }
         }
+    }
     }
 }
 

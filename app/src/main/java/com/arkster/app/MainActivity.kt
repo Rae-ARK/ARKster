@@ -24,6 +24,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
@@ -583,17 +584,28 @@ class MainActivity : ComponentActivity() {
                     // Splash always renders on its own solid-black canvas (see
                     // SplashScreen.kt) regardless of the selected reader theme, so force
                     // light/white status bar icons here rather than deriving them from
-                    // colorScheme.background like the real content below does.
+                    // colorScheme.background like the real content below does, and paint
+                    // the status bar itself black to match that canvas (see the SideEffect
+                    // below for why statusBarColor needs to be set explicitly at all).
                     SideEffect {
                         WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = false
+                        window.statusBarColor = Color.Black.toArgb()
                     }
                     SplashScreen(onFinished = { showSplash.value = false })
                     return@MaterialTheme
                 }
 
+                // The manifest's android:theme is a fixed system light theme, so its
+                // statusBarColor default never tracks Light/Dark/Warm Paper - the status
+                // bar stayed one fixed color while everything below it changed, sticking
+                // out against every theme but the one that happened to match the default.
+                // Painting it with the resolved background on every theme change (not just
+                // fixing the icon color above) makes the status bar read as part of the
+                // app's surface instead of a leftover system chrome strip.
                 SideEffect {
                     WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars =
                         colorScheme.background.luminance() > 0.5f
+                    window.statusBarColor = colorScheme.background.toArgb()
                 }
 
                 // The manifest's android:theme is a fixed system light theme (needed before

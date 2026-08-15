@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -90,7 +91,14 @@ fun ChapterEditorScreen(
             }
         )
 
-        LazyColumn {
+        // Without a weight, this LazyColumn was measured up to the full height the
+        // parent Column had available and greedily claimed all of it (LazyColumn fills
+        // available space in its scroll direction by default) - so the Save button
+        // below, laid out after it in a plain non-scrolling Column, got pushed past the
+        // bottom of the screen and was never reachable. weight(1f, fill = true) caps
+        // the list to the space left over after the TopAppBar and Save button, matching
+        // the same pattern NovelDetailScreen's chapter list already uses.
+        LazyColumn(modifier = Modifier.weight(1f, fill = true)) {
             items(editedChapters.value, key = { it.id }) { chapter ->
                 Card(modifier = Modifier.padding(8.dp)) {
                     Column(modifier = Modifier.padding(12.dp)) {
