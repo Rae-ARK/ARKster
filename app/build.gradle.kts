@@ -60,6 +60,13 @@ android {
             if (hasReleaseSigning) {
                 signingConfig = signingConfigs.getByName("release")
             }
+            // Explicit rather than relying on AGP's default, since this APK is
+            // handed directly to sideloaders rather than going through Play's
+            // App Bundle pipeline - keep the build predictable and skip R8/
+            // resource-shrinking risk (stripped Room/Compose reflection, etc.)
+            // until proguard rules are actually written and tested.
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
 
@@ -74,6 +81,22 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
+    }
+}
+
+// Sideloaders download a single APK straight from the GitHub Actions artifact
+// (see .github/workflows/release.yml) rather than through a Play Store listing,
+// so give it a name that identifies itself instead of the generic
+// "app-release.apk" - handy once more than one release is floating around in
+// someone's Downloads folder. Uses the stable public Variant API (not the
+// deprecated/internal applicationVariants) so it won't break on AGP upgrades.
+androidComponents {
+    onVariants { variant ->
+        variant.outputs.forEach { output ->
+            output.outputFileName.set(
+                "ARKster-${android.defaultConfig.versionName}-${variant.name}.apk"
+            )
+        }
     }
 }
 
