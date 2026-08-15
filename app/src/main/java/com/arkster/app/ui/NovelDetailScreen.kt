@@ -1,9 +1,12 @@
 package com.arkster.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -33,8 +36,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -84,6 +85,10 @@ fun NovelDetailScreen(
     val tabs = listOf("All Chapters") + arcs.map { it.name }
     var descriptionExpanded by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
+
+    // Per-tab counts for the tab strip captions below - computed once per chapters
+    // list change rather than re-filtering per tab on every recomposition.
+    val chapterCountByArcId = remember(chapters) { chapters.groupingBy { it.arcId }.eachCount() }
 
     val chaptersInArc = when (selectedTabIndex.intValue) {
         0 -> chapters
@@ -306,58 +311,38 @@ fun NovelDetailScreen(
                 }
             }
 
-            // Arc tabs
+            // Arc tabs, Royal Road-style: a horizontal strip of real cover art per
+            // arc (plus the novel's own cover for "All Chapters"), not a plain text
+            // TabRow. This replaces both the old text-only tabs *and* the separate
+            // 48x68dp "selected arc" header that used to appear below them - that
+            // header only showed a cover AFTER you'd already picked a tab blind,
+            // which defeats the point of having arc covers at all. Now the cover is
+            // the thing you tap to choose, sized large enough to actually recognize
+            // (92x130dp, same aspect as the novel header cover), with the arc name
+            // and chapter count as a caption underneath, matching RR's ToC strip.
             if (tabs.size > 1) {
                 item {
-                    TabRow(selectedTabIndex = selectedTabIndex.intValue) {
-                        tabs.forEachIndexed { index, tab ->
-                            Tab(
-                                selected = selectedTabIndex.intValue == index,
-                                onClick = { selectedTabIndex.intValue = index },
-                                text = { Text(tab) }
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        item {
+                            ArcTabCard(
+                                coverUrl = novel.coverUri ?: novel.remoteCoverUrl,
+                                label = "All Chapters",
+                                count = chapters.size,
+                                selected = selectedTabIndex.intValue == 0,
+                                onClick = { selectedTabIndex.intValue = 0 }
                             )
                         }
-                    }
-                }
-            }
-
-            // Per-arc cover header - shown only when an actual arc tab (not "All
-            // Chapters") is selected. ArcEntity.coverUri has been resolved by the
-            // scanner since bugs.md Bug 3a (findCoverUri's broadened match) and has
-            // been shown in the reader's small breadcrumb thumbnail since Bug 3b, but
-            // this fiction/table-of-contents page never rendered it anywhere at all -
-            // that's the gap being closed here, not a regression of either prior fix.
-            // A missing arc cover falls back to the same 📚 placeholder
-            // NovelCoverThumb already shows for a missing novel cover, so an arc with
-            // no cover.* file just shows the placeholder instead of nothing.
-            val selectedArc = arcs.getOrNull(selectedTabIndex.intValue - 1)
-            if (selectedArc != null) {
-                item {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        NovelCoverThumb(
-                            coverUrl = selectedArc.coverUri,
-                            modifier = Modifier
-                                .width(48.dp)
-                                .height(68.dp)
-                        )
-                        Column(modifier = Modifier.padding(start = 12.dp)) {
-                            Text(
-                                selectedArc.name,
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                "${chaptersInTab.size} Chapters",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 2.dp)
+                        itemsIndexed(arcs) { index, arc ->
+                            ArcTabCard(
+                                coverUrl = arc.coverUri,
+                                label = arc.name,
+                                count = chapterCountByArcId[arc.id] ?: 0,
+                                selected = selectedTabIndex.intValue == index + 1,
+                                onClick = { selectedTabIndex.intValue = index + 1 }
                             )
                         }
                     }
@@ -543,6 +528,59 @@ private fun ChapterTag(label: String) {
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onTertiaryContainer,
             fontSize = 10.sp
+        )
+    }
+}
+
+// A single tappable cover card in the arc strip - the actual selection surface,
+// not just decoration. 92dp wide matches roughly a phone screen fitting ~3.5
+// cards, same aspect ratio as the big novel header cover so it reads as "the
+// same kind of thing, zoomed out" rather than a differently-shaped thumbnail.
+// Selected state is a 2dp primary-color border plus bolded/colored caption -
+// deliberately not relying on color alone, since the cover art itself varies
+// wildly and a color-only highlight can get lost against a busy image.
+@Composable
+private fun ArcTabCard(
+    coverUrl: String?,
+    label: String,
+    count: Int,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .width(92.dp)
+            .clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        NovelCoverThumb(
+            coverUrl = coverUrl,
+            modifier = Modifier
+                .width(92.dp)
+                .height(130.dp)
+                .let { base ->
+                    if (selected) {
+                        base.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(6.dp))
+                    } else {
+                        base
+                    }
+                }
+        )
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            modifier = Modifier.padding(top = 6.dp)
+        )
+        Text(
+            "$count Chapters",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
         )
     }
 }

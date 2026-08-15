@@ -306,3 +306,31 @@ pass, EPUB-specific:
    not a final commitment.)*
 
 Remaining open items should be resolved before the Stage they block begins.
+
+##Extra I Added.
+
+epublib (psiegman/epublib on GitHub) is exactly the profile you're describing: mature, functionally complete, and essentially in maintenance mode rather than active churn.
+
+github
+epublib.readthedocs
+Image unavailable
+epublib (psiegman/epublib)
+A Java library for reading, writing, and manipulating EPUB files, with a core module that runs on both Android and plain JVM. It's been stable for years — infrequent commits, no breaking API churn, 1.1k+ stars, LGPL license. Gives you Book/Metadata/Spine/TableOfContents/Resource model classes so you can open an .epub, walk its manifest and TOC, and pull out chapter HTML + the cover image with a handful of calls (EpubReader().readEpub(inputStream) is the whole entry point). Trade-off: it's plain Java, not Kotlin-idiomatic, and it's not actively maintained — you're taking on a dependency that won't get new EPUB3-spec features, so anything unusual (complex media overlays, some malformed real-world EPUBs) may need you to patch it yourself. For your use case (scanning local folders, extracting chapter text/covers into your Room DB) that's a good trade: you don't want a library that changes its API under you every few months.
+github.com
+
+A few practical notes on integrating it:
+
+Gradle: it's not on Maven Central, but the author publishes a small maven repo:
+kotlin
+  repositories {
+      maven { url = uri("https://github.com/psiegman/mvn-repo/raw/master/releases") }
+  }
+  dependencies {
+      implementation("nl.siegmann.epublib:epublib-core:4.0") {
+          exclude(group = "org.slf4j")
+          exclude(group = "xmlpull")
+      }
+      implementation("org.slf4j:slf4j-android:1.7.25")
+  }
+License is LGPL — fine to use as a dependency (dynamic linking), but worth knowing if you ever plan to close-source or distribute ARKster commercially; LGPL doesn't require you to open-source your own app, just that the library itself (and any modifications to it) stay under LGPL.
+Since it's unmaintained, expect to hit occasional edge cases with modern/malformed EPUB3 files (some webnovel-to-epub exporters produce slightly nonstandard OPF/NCX). You'd likely want a small wrapper/adapter layer in your scanner rather than calling EpubReader directly everywhere, so if you ever do need to patch or swap it out, it's contained to one file.
