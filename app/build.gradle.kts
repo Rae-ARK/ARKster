@@ -30,6 +30,39 @@ android {
         buildConfig = true
     }
 
+    // Release signing is sourced from env vars so the keystore itself never has to
+    // live in the repo. CI (see .github/workflows/release.yml) decodes a base64
+    // secret to a keystore file and exports these four vars before invoking
+    // assembleRelease. Locally, export the same four vars yourself if you want a
+    // signed release build; if they're absent, `release` silently falls back to
+    // AGP's default (unsigned) release build type instead of failing the build.
+    val releaseStoreFile = System.getenv("ARKSTER_RELEASE_STORE_FILE")
+    val releaseStorePassword = System.getenv("ARKSTER_RELEASE_STORE_PASSWORD")
+    val releaseKeyAlias = System.getenv("ARKSTER_RELEASE_KEY_ALIAS")
+    val releaseKeyPassword = System.getenv("ARKSTER_RELEASE_KEY_PASSWORD")
+    val hasReleaseSigning = listOf(
+        releaseStoreFile, releaseStorePassword, releaseKeyAlias, releaseKeyPassword
+    ).all { !it.isNullOrBlank() }
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(releaseStoreFile!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
+    buildTypes {
+        getByName("release") {
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+        }
+    }
+
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.3"
     }
