@@ -38,7 +38,7 @@ Push to `main` or `develop` branches to trigger automatic APK builds. Artifacts 
 - [Android design & architecture](docs/ARKster_ANDROID_DESIGN.md) — design overview, storage model, BookSource abstraction
 - [App README](app/README.md) — feature summary and build notes
 - [Scanner POC notes](spec/SCANNER_POC.md) — heuristics and progressive scan UX
-- [Bug reports & fixes](bugs.md) — root-caused bugs and how each was patched, in order
+- [Bug reports & fixes](docs/bugs.md) — root-caused bugs and how each was patched, in order
 - `docs/done and dealth with/` — completed roadmaps and staged plans, kept for history:
   [v0.2 Roadmap](docs/done%20and%20dealth%20with/V0.2_ROADMAP.md),
   [v0.2 completion summary](docs/done%20and%20dealth%20with/V0.2_COMPLETION_SUMMARY.md),
