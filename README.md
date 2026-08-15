@@ -9,7 +9,12 @@ Key points:
 - No accounts, no syncing, metadata downloads are opt-in and cached locally.
 
 ## Current status
-**v0.1 MVP complete** — Library scan, novel indexing, chapter reader, and persistent URI storage are ready.
+**v0.2** — see `app/build.gradle.kts`'s `versionName`, the single source of truth the
+app itself reads back via `BuildConfig.VERSION_NAME` (shown in Settings and on the
+crash screens). Library scan, novel indexing, arcs, author pages, a Royal
+Road-style chapter reader with Reader Preferences, and persistent URI storage are
+all in place; incremental/diff-based rescan now also reconciles deleted novels
+correctly (see `bugs.md`).
 
 ## Quick start
 1. Clone this repository and open the `/app` folder in Android Studio.
@@ -31,14 +36,18 @@ Push to `main` or `develop` branches to trigger automatic APK builds. Artifacts 
 
 ## Documentation
 - [Android design & architecture](docs/ARKster_ANDROID_DESIGN.md) — design overview, storage model, BookSource abstraction
-- [v0.1 MVP app README](app/README.md) — feature summary and build notes
-- [v0.2 Roadmap](docs/V0.2_ROADMAP.md) — arcs, pagination prefs, manual edits, incremental rescan
+- [App README](app/README.md) — feature summary and build notes
 - [Scanner POC notes](spec/SCANNER_POC.md) — heuristics and progressive scan UX
-- [Author page & chapter page redesign (staged plan)](docs/AUTHOR_PAGE_AND_CHAPTER_REDESIGN.md) — `author.json` contract and Stage 0-5 rollout; Stage 0 (docs) only so far
+- [Bug reports & fixes](bugs.md) — root-caused bugs and how each was patched, in order
+- `docs/done and dealth with/` — completed roadmaps and staged plans, kept for history:
+  [v0.2 Roadmap](docs/done%20and%20dealth%20with/V0.2_ROADMAP.md),
+  [v0.2 completion summary](docs/done%20and%20dealth%20with/V0.2_COMPLETION_SUMMARY.md),
+  [UI overhaul summary](docs/done%20and%20dealth%20with/UI_OVERHAUL_SUMMARY.md),
+  [Author page & chapter page redesign](docs/done%20and%20dealth%20with/AUTHOR_PAGE_AND_CHAPTER_REDESIGN.md)
 
 ## Architecture highlights
 - **Room + DataStore**: Indexed library state + lightweight prefs.
-- **BookSource abstraction**: FolderSource (v0.1), then EpubSource and PdfSource (v0.3+).
+- **BookSource abstraction**: FolderSource (shipped), then EpubSource and PdfSource (later milestones - see `docs/EPUB_SUPPORT.md`).
 - **ChapterContentRepository**: Unified interface for reading chapter text across sources.
 - **Graceful degradation**: Auto-generated covers, best-effort title parsing, user override editor.
 

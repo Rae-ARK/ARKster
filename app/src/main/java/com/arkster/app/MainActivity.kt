@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import com.arkster.app.BuildConfig
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
@@ -425,6 +426,14 @@ class MainActivity : ComponentActivity() {
                         .padding(24.dp)
                 ) {
                     Text(title, style = MaterialTheme.typography.titleLarge)
+                    // Same BuildConfig.VERSION_NAME used in Settings' About line -
+                    // worth having on a crash report screen specifically, since "what
+                    // version were they on" is the first thing a bug report needs.
+                    Text(
+                        "ARKster v${BuildConfig.VERSION_NAME}",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
                     androidx.compose.foundation.lazy.LazyColumn(modifier = Modifier.padding(top = 16.dp)) {
                         item {
                             Text(details, style = MaterialTheme.typography.bodySmall)
@@ -467,7 +476,8 @@ class MainActivity : ComponentActivity() {
                 getSharedPreferences(CRASH_PREFS, MODE_PRIVATE).edit()
                     .putString(
                         CRASH_KEY,
-                        (throwable::class.java.name + ": " + throwable.message) + "\n\n" +
+                        "ARKster v${BuildConfig.VERSION_NAME}\n\n" +
+                            (throwable::class.java.name + ": " + throwable.message) + "\n\n" +
                             throwable.stackTrace.take(30).joinToString("\n") { "  at $it" }
                     )
                     .commit() // commit(), not apply() - must be on disk before the process dies

@@ -12,12 +12,22 @@ android {
         applicationId = "com.arkster.app"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1"
+        // Single source of truth for the app's version, anywhere it needs to be shown.
+        // Everything in-app (Settings' About section, both crash screens, the
+        // persisted last-crash trace) reads this back via the generated
+        // BuildConfig.VERSION_NAME/VERSION_CODE rather than a hardcoded string, so
+        // there's exactly one place to bump per release. Static docs (README.md,
+        // app/README.md) can't read a Gradle value at doc-render time and are kept in
+        // sync by hand - bump those alongside this when you bump here.
+        versionCode = 2
+        versionName = "0.2"
     }
 
     buildFeatures {
         compose = true
+        // Needed to generate BuildConfig.VERSION_NAME/VERSION_CODE from the values
+        // above - AGP 8+ no longer turns this on implicitly just because compose is.
+        buildConfig = true
     }
 
     composeOptions {

@@ -6,15 +6,18 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.Button
+import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.arkster.app.BuildConfig
 import com.arkster.app.data.Theme
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -56,6 +59,18 @@ fun SettingsScreen(
             ) {
                 Text(if (hasLibrary) "Rescan Library" else "Select Library Folder")
             }
+
+            Divider(modifier = Modifier.padding(top = 24.dp, bottom = 12.dp))
+
+            // BuildConfig.VERSION_NAME is generated from app/build.gradle.kts'
+            // defaultConfig.versionName - the single source of truth for the app's
+            // version. This is the only place in the running app's normal UI that
+            // shows it; the crash screens in MainActivity read the same field.
+            Text(
+                "ARKster v${BuildConfig.VERSION_NAME}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+            )
         }
     }
 }
