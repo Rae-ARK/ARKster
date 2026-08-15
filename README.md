@@ -53,4 +53,3 @@ Push to `main` or `develop` branches to trigger automatic APK builds. Artifacts 
 
 ## License
 GPLv3
-
