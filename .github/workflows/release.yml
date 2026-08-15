@@ -1,6 +1,5 @@
 name: Build Release APK
 
-
 # Manual only - unlike build.yml's debug build (which runs on every push to
 # main/develop), a release is a deliberate act: pick the branch/ref via the
 # Actions tab's "Run workflow" dropdown (or `gh workflow run "Build Release
@@ -11,6 +10,15 @@ on:
 jobs:
   build-release:
     runs-on: ubuntu-latest
+    # A step's own `if:` condition cannot see the `secrets` context directly
+    # (GitHub Actions rejects that at workflow-parse time - "Unrecognized
+    # named-value: 'secrets'" - which is exactly the 422 this repo hit trying
+    # to dispatch this workflow). `secrets` IS readable from job-level `env:`,
+    # though, and job-level env IS visible inside every step's `if:` - so the
+    # presence check has to be computed here and read back via `env.` below,
+    # not via `secrets.` directly in the step's `if:`.
+    env:
+      HAS_RELEASE_KEYSTORE: ${{ secrets.ARKSTER_KEYSTORE_BASE64 != '' }}
 
     steps:
     - uses: actions/checkout@v4
@@ -50,7 +58,7 @@ jobs:
     # failing outright - useful for verifying the release build type compiles
     # before a signing key has been generated yet.
     - name: Decode signing keystore
-      if: ${{ secrets.ARKSTER_KEYSTORE_BASE64 != '' }}
+      if: ${{ env.HAS_RELEASE_KEYSTORE == 'true' }}
       env:
         ARKSTER_KEYSTORE_BASE64: ${{ secrets.ARKSTER_KEYSTORE_BASE64 }}
       run: |
