@@ -82,20 +82,20 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
-}
 
-// Sideloaders download a single APK straight from the GitHub Actions artifact
-// (see .github/workflows/release.yml) rather than through a Play Store listing,
-// so give it a name that identifies itself instead of the generic
-// "app-release.apk" - handy once more than one release is floating around in
-// someone's Downloads folder. Uses the stable public Variant API (not the
-// deprecated/internal applicationVariants) so it won't break on AGP upgrades.
-androidComponents {
-    onVariants { variant ->
-        variant.outputs.forEach { output ->
-            output.outputFileName.set(
-                "ARKster-${android.defaultConfig.versionName}-${variant.name}.apk"
-            )
+    // Sideloaders download a single APK straight from the GitHub Actions
+    // artifact (see .github/workflows/release.yml) rather than through a Play
+    // Store listing, so give it a name that identifies itself instead of the
+    // generic "app-release.apk" - handy once more than one release is floating
+    // around in someone's Downloads folder. `com.android.build.gradle.api.
+    // ApkVariantOutput` is the officially documented public API for this on
+    // AGP 8.x (see Android Gradle recipes); the newer androidComponents/
+    // Variant API's outputFileName doesn't resolve reliably until AGP 9.
+    applicationVariants.all {
+        val variant = this
+        outputs.all {
+            val output = this as com.android.build.gradle.api.ApkVariantOutput
+            output.outputFileName = "ARKster-${variant.versionName}-${variant.name}.apk"
         }
     }
 }
