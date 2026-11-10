@@ -1,5 +1,6 @@
 package com.arkster.app.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,6 +24,10 @@ fun ChapterLoadErrorScreen(
     onRetry: () -> Unit,
     onBack: () -> Unit
 ) {
+    // See FictionBrowseScreen.kt: without this, system/gesture back skipped
+    // onBack and exited the app instead of returning to the fiction.
+    BackHandler(onBack = onBack)
+
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),

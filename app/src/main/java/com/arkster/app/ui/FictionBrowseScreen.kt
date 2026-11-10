@@ -1,5 +1,6 @@
 package com.arkster.app.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -68,6 +69,14 @@ fun FictionBrowseScreen(
     onNovelSelected: (NovelEntity) -> Unit = {},
     onBack: () -> Unit = {}
 ) {
+    // Bug: the system/gesture back button bypassed this screen's own onBack
+    // entirely and fell through to the Activity default (finish the app),
+    // since nothing here claimed the back event. BackHandler intercepts it
+    // and routes it through the exact same onBack already wired to the
+    // in-app back arrow above, so hardware/gesture back now does the same
+    // thing the visible arrow does instead of always exiting.
+    BackHandler(onBack = onBack)
+
     val searchQuery = remember { mutableStateOf("") }
     val selectedSort = remember { mutableStateOf(SortBy.RECENTLY_UPDATED) }
     val selectedStatus = remember { mutableStateOf(StatusFilter.ALL) }

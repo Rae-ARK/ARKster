@@ -1,5 +1,6 @@
 package com.arkster.app.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -36,6 +37,10 @@ fun ChapterEditorScreen(
     onSave: suspend (List<ChapterEntity>, Set<String>) -> Unit,
     onBack: () -> Unit
 ) {
+    // See FictionBrowseScreen.kt: without this, system/gesture back skipped
+    // onBack and exited the app instead of returning to the fiction.
+    BackHandler(onBack = onBack)
+
     val editedChapters = remember { mutableStateOf(chapters) }
     val arcStartIds = remember { mutableStateOf(initialArcStartIds) }
     val coroutineScope = rememberCoroutineScope()

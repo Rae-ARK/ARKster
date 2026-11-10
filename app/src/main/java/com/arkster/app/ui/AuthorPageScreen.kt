@@ -1,5 +1,6 @@
 package com.arkster.app.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -60,6 +61,11 @@ fun AuthorPageScreen(
     onBack: () -> Unit,
     onNovelClick: (NovelEntity) -> Unit = {}
 ) {
+    // See FictionBrowseScreen.kt: without this, system/gesture back skipped
+    // onBack and exited the app instead of returning to where this author
+    // page was opened from (Screen.Author's `from`, in MainActivity.kt).
+    BackHandler(onBack = onBack)
+
     val links = remember(author.linksJson) { parseAuthorLinks(author.linksJson) }
     val uriHandler = LocalUriHandler.current
 

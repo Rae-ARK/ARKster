@@ -1,5 +1,6 @@
 package com.arkster.app.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -77,6 +78,10 @@ fun NovelDetailScreen(
     onFetchInfoClick: () -> Unit = {},
     onAuthorClick: () -> Unit = {}
 ) {
+    // See FictionBrowseScreen.kt: without this, system/gesture back skipped
+    // onBack and exited the app instead of returning to Home.
+    BackHandler(onBack = onBack)
+
     val selectedTabIndex = remember { mutableIntStateOf(0) }
     // Seeded from the novel's persisted page_size so the preference survives navigation
     // away and back, not just within a single composition.
