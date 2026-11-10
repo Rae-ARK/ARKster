@@ -5,6 +5,7 @@ build/
 .DS_Store
 local.properties
 *.patch
+*.txt
 
 # Signing material - the actual RELEASE keystore must never be committed. CI
 # decodes it from the ARKSTER_RELEASE_KEYSTORE_BASE64 secret at build time
