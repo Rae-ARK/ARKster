@@ -32,6 +32,7 @@ import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import com.arkster.app.ui.AboutScreen
 import com.arkster.app.ui.ChapterEditorScreen
+import com.arkster.app.ui.ChapterLoadErrorScreen
 import com.arkster.app.ui.AuthorPageScreen
 import com.arkster.app.ui.HomeScreen
 import com.arkster.app.ui.LegalContent
@@ -57,6 +58,7 @@ import com.arkster.app.data.PreferencesManager
 import com.arkster.app.data.Theme
 import com.arkster.app.data.NovelStatus
 import com.arkster.app.data.TextChapterContentRepository
+import com.arkster.app.data.ChapterLoadResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -66,6 +68,9 @@ sealed class Screen {
     object Home : Screen()
     data class NovelDetail(val novel: NovelEntity) : Screen()
     data class Reader(val novelId: String, val chapter: ChapterEntity, val content: String) : Screen()
+    // See bugs.md Bug 8: shown instead of Reader when getTextContent comes back
+    // ChapterLoadResult.Failed, rather than opening the reader on an empty chapter.
+    data class ChapterLoadError(val novelId: String, val chapter: ChapterEntity) : Screen()
     data class ChapterEditor(val novel: NovelEntity) : Screen()
     // Carries the previous screen so onBack can return to wherever the tap into the
     // author page came from (fiction page byline or chapter page's "About the author"
@@ -199,6 +204,12 @@ class MainActivity : ComponentActivity() {
         // here, matching the same accepted tradeoff scanChaptersForNovel's
         // seenChapterIds/seenArcIds already make for a single skipped item.
         val seenNovelIds = mutableSetOf<String>()
+        // See bugs.md Bug 6: set from onAuthorsDiscovered, which scanRoot always fires
+        // before any per-novel onDiscovered below (same scan pass), then read inside
+        // onDiscovered's merge. Defaults to true so a scan that never gets as far as
+        // calling onAuthorsDiscovered at all (e.g. the early "folder no longer
+        // accessible" returns in scanRoot) doesn't itself look like a missing authors/.
+        var authorsFolderFound = true
         try {
             scanner.scanRoot(treeUri,
                 onDiscovered = { scanned, novelFolder ->
@@ -238,6 +249,16 @@ class MainActivity : ComponentActivity() {
                                 pageSize = existing.pageSize,
                                 readingStatus = existing.readingStatus,
                                 author = scanned.author ?: existing.author,
+                                // See bugs.md Bug 6: the long comment above explains why
+                                // scanned.authorId normally wins outright instead of falling
+                                // back like `author` does - but that's only true when this
+                                // pass actually reached authors/. When it didn't
+                                // (authorsFolderFound == false), ScannerImpl had nothing to
+                                // resolve against, so scanned.authorId is null for every
+                                // novel regardless of whether that novel's link is really
+                                // gone. Keep the existing link in that case instead of
+                                // wiping it.
+                                authorId = if (authorsFolderFound) scanned.authorId else existing.authorId,
                                 description = if (remoteFetched) existing.description else (scanned.description ?: existing.description),
                                 genres = if (remoteFetched) existing.genres else (scanned.genres ?: existing.genres),
                                 remoteCoverUrl = existing.remoteCoverUrl,
@@ -265,15 +286,19 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 },
-                onAuthorsDiscovered = { discoveredAuthors ->
-                    // Same diff-and-remove pattern scanChaptersForNovel already uses for
-                    // arcs: upsert everything this scan found under authors/, then drop
-                    // any previously-known author row that scan didn't see this time
-                    // (its authors/<id>.json was deleted or renamed).
-                    val seenIds = discoveredAuthors.map { it.id }.toSet()
+                onAuthorsDiscovered = { discoveredAuthors, authorsFolderFoundThisPass ->
+                    authorsFolderFound = authorsFolderFoundThisPass
                     discoveredAuthors.forEach { db.authorDao().upsert(it) }
-                    db.authorDao().all().filter { it.id !in seenIds }.forEach { stale ->
-                        db.authorDao().delete(stale.id)
+                    // See bugs.md Bug 6: only prune authors that scan didn't see this time
+                    // when authors/ was actually found - an empty discoveredAuthors list
+                    // because authorsFolder itself couldn't be found (transient SAF hiccup)
+                    // must not be read as "every author was deleted", same reasoning as
+                    // decideStaleNovels for novels (see ScanReconcile.kt).
+                    if (authorsFolderFoundThisPass) {
+                        val seenIds = discoveredAuthors.map { it.id }.toSet()
+                        db.authorDao().all().filter { it.id !in seenIds }.forEach { stale ->
+                            db.authorDao().delete(stale.id)
+                        }
                     }
                 },
                 onScanCompleted = {
@@ -350,6 +375,17 @@ class MainActivity : ComponentActivity() {
         authorPageAuthor.value = db.authorDao().findById(authorId)
         authorPageNovels.clear()
         authorPageNovels.addAll(db.novelDao().byAuthor(authorId))
+    }
+
+    // See bugs.md Bug 8: getTextContent now returns a ChapterLoadResult instead of the
+    // chapter text directly, so every entry point into the reader (initial open,
+    // Previous/Next) routes through here instead of reaching into `.content.body`
+    // itself and risks silently opening an empty chapter on a read failure.
+    private suspend fun openChapter(novelId: String, chapter: ChapterEntity) {
+        when (val result = contentRepo.getTextContent(chapter.sourcePath)) {
+            is ChapterLoadResult.Ok -> currentScreen.value = Screen.Reader(novelId, chapter, result.content.body)
+            is ChapterLoadResult.Failed -> currentScreen.value = Screen.ChapterLoadError(novelId, chapter)
+        }
     }
 
     // Diffs the editor's edited chapter list against the raw scanned chapters and
@@ -705,8 +741,7 @@ class MainActivity : ComponentActivity() {
                                                 // correctly-scoped chapter list to compute neighbors.
                                                 loadNovelDetails(novel)
                                                 readerAuthor.value = novel.authorId?.let { db.authorDao().findById(it) }
-                                                val chapterContent = contentRepo.getTextContent(chapter.sourcePath)
-                                                currentScreen.value = Screen.Reader(novel.id, chapter, chapterContent.body)
+                                                openChapter(novel.id, chapter)
                                             }
                                         } else {
                                             loadNovelDetails(novel)
@@ -752,8 +787,7 @@ class MainActivity : ComponentActivity() {
                                         db.novelDao().updateReadingStatus(novel.id, NovelStatus.IN_PROGRESS.name)
                                         refreshRecentlyRead()
                                         readerAuthor.value = novel.authorId?.let { db.authorDao().findById(it) }
-                                        val chapterContent = contentRepo.getTextContent(chapter.sourcePath)
-                                        currentScreen.value = Screen.Reader(novel.id, chapter, chapterContent.body)
+                                        openChapter(novel.id, chapter)
                                     }
                                 },
                                 onResizePages = { pageSize ->
@@ -828,8 +862,7 @@ class MainActivity : ComponentActivity() {
                                     { progress: Float ->
                                         lifecycleScope.launch {
                                             saveReadingProgress(reader.novelId, reader.chapter.id, progress)
-                                            val chapterContent = contentRepo.getTextContent(prev.sourcePath)
-                                            currentScreen.value = Screen.Reader(reader.novelId, prev, chapterContent.body)
+                                            openChapter(reader.novelId, prev)
                                         }
                                     }
                                 },
@@ -837,8 +870,7 @@ class MainActivity : ComponentActivity() {
                                     { progress: Float ->
                                         lifecycleScope.launch {
                                             saveReadingProgress(reader.novelId, reader.chapter.id, progress)
-                                            val chapterContent = contentRepo.getTextContent(next.sourcePath)
-                                            currentScreen.value = Screen.Reader(reader.novelId, next, chapterContent.body)
+                                            openChapter(reader.novelId, next)
                                         }
                                     }
                                 },
@@ -847,6 +879,22 @@ class MainActivity : ComponentActivity() {
                                     if (authorId != null) {
                                         currentScreen.value = Screen.Author(authorId, from = currentScreen.value)
                                     }
+                                }
+                            )
+                        }
+
+                        is Screen.ChapterLoadError -> {
+                            val errorScreen = currentScreen.value as Screen.ChapterLoadError
+                            ChapterLoadErrorScreen(
+                                chapterTitle = errorScreen.chapter.title,
+                                onRetry = {
+                                    lifecycleScope.launch {
+                                        openChapter(errorScreen.novelId, errorScreen.chapter)
+                                    }
+                                },
+                                onBack = {
+                                    val novel = novels.firstOrNull { it.id == errorScreen.novelId }
+                                    currentScreen.value = if (novel != null) Screen.NovelDetail(novel) else Screen.Home
                                 }
                             )
                         }

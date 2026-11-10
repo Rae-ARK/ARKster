@@ -138,11 +138,18 @@ fun warmPaperColorScheme() = lightColorScheme(
     surfaceTint = Color(0xFF845425)
 )
 
-// ARKster's Theme enum has no SYSTEM_DEFAULT (unlike ARKarium's) - it's a straight
-// three-way LIGHT/DARK/WARM_PAPER choice stored directly in PreferencesManager, so
-// there's no resolveTheme step to port over here.
+// ARKster's Theme enum since gained a SYSTEM_DEFAULT case (see PreferencesManager.kt
+// and MainActivity.resolveTheme) - this file predates that and the comment above used
+// to say there was no such case to handle here. There's still no palette of System
+// Default's own: resolveTheme() always substitutes a concrete Light/Dark theme before
+// a caller needs an actual color scheme, so this branch is never actually reached.
+// Kept as an exhaustive branch (falling back to the same lightColorSchemeApp() the
+// LIGHT case uses) rather than `else`, so a future Theme case fails to compile here
+// instead of silently falling through - same reasoning as MainActivity's own
+// colorSchemeFor.
 fun colorSchemeFor(theme: Theme) = when (theme) {
     Theme.LIGHT -> lightColorSchemeApp()
     Theme.DARK -> darkColorSchemeApp()
     Theme.WARM_PAPER -> warmPaperColorScheme()
+    Theme.SYSTEM_DEFAULT -> lightColorSchemeApp()
 }
