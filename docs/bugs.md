@@ -423,3 +423,99 @@ starts.
 - `app/src/main/java/com/arkster/app/data/ScannerImpl.kt` — new `onScanCompleted` param on `scanRoot`, fired after a genuine full pass
 - `app/src/main/java/com/arkster/app/data/Dao.kt` — new `NovelDao.delete(novelId)`
 - `app/src/main/java/com/arkster/app/MainActivity.kt` — `seenNovelIds` tracking + reconciliation in `startScan`'s `onScanCompleted`; removed `novels.clear()` from Settings' `onRescan`
+
+---
+
+## Stage 6 - fixes ported from ARKarium
+
+ARKarium (the author-to-reader successor, see its own docs) closed several bugs in code
+that ARKster still shares. Only the ones that apply to a purely local-folder reader were
+ported; ARKarium's sync, relay, TTS-service, manifest-signing and window-inset work has
+no counterpart here and was left alone. Not compiled or run on a device - see the
+"Needs an on-device check" notes below.
+
+### Bug 5 - A scan could cascade-delete a novel's overrides and reading progress
+
+**Status: fixed.**
+
+**Symptom / cause:** Bug 4's reconcile (`onScanCompleted` deleting every DB novel not in
+`seenNovelIds`) trusted a single pass as proof of deletion, and had two holes:
+
+1. `seenNovelIds.add()` ran only *after* `findById`/`upsert`, so a novel whose metadata or
+   cover read, merge, or upsert threw (the per-novel `catch` just prints "Skipped ...") was
+   indistinguishable from a deleted folder and was cascade-deleted - taking its
+   `chapter_overrides` and `reading_progress`, which a rescan cannot regenerate.
+2. A SAF provider may return a partial or empty listing (not warmed up, a removable
+   volume still populating). A pass that found no folders at all, or only some of them,
+   was read as "the library shrank".
+
+**Fix:** `ScannerImpl.scanRoot` now reports each novel folder through `onNovelFolderSeen`
+before any fallible I/O, and passes `sawAnyNovelFolders` to `onScanCompleted`. The decision
+is a pure function, `decideStaleNovels` (`data/ScanReconcile.kt`, covered by
+`ScanReconcileTest`): an empty listing over a non-empty library skips cleanup entirely, and
+otherwise a novel is only deleted when it was also missing from the previous completed
+pass. That pending set is persisted (SharedPreferences `arkster_scan_state`) rather than
+kept in memory, because ARKster scans once per launch - in memory, a genuinely deleted
+folder would only disappear after two scans in one session.
+
+**Tradeoff:** a folder you really deleted now disappears one scan later (next launch or
+the next "Rescan Library") instead of immediately.
+
+### Bug 6 - A pass that couldn't find `authors/` wiped every author and author link
+
+**Status: fixed.** `onAuthorsDiscovered` deleted every known author whenever the list came
+back empty, and the novel merge let a null `scanned.authorId` overwrite a working link. Both
+now check `authorsFolderFound` (`authorsFolder != null`): nothing is deleted, and an
+existing `authorId` is kept, when the pass never reached `authors/`.
+
+### Bug 7 - A missing Room migration silently wiped the database
+
+**Status: fixed.** `AppDatabase.create()` used `fallbackToDestructiveMigration()`, which
+drops everything for any version Room has no path for - including `chapter_overrides` and
+`reading_progress`. Removed. Because that turns a *downgrade* (an older sideloaded APK over
+newer data) into an exception, `create()` now converts it to `DatabaseDowngradeException`,
+and `MainActivity.onCreate` shows a plain "update the app rather than reinstalling an older
+version" message. Room opens the file lazily, which would let that exception escape on the
+first query inside a coroutine, so `create()` forces the open (`openHelper.writableDatabase`)
+inside its try/catch.
+
+**Still open (same as ARKarium):** no exported schema or migration tests yet - a future
+missed migration will now crash loudly at startup instead of wiping data, but nothing
+catches it before release.
+
+### Bug 8 - An unreadable chapter opened as an empty chapter
+
+**Status: fixed.** `TextChapterContentRepository` swallowed every read failure (and a null
+stream) into an empty byte array, so a lost folder grant or provider hiccup looked like a
+blank chapter, and reading progress was then saved against it. It now returns
+`ChapterLoadResult.Ok`/`Failed` (cancellation is still rethrown); `MainActivity.openChapter`
+routes a failure to a new `ChapterLoadErrorScreen` with **Try again** and **Back**.
+
+### Bug 9 - The persisted folder grant was never released on re-pick
+
+**Status: fixed.** Each "pick library folder" took a new persistable URI grant and never
+released the old one; Android caps these per app, and `takePersistableUriPermission` throws
+once the cap is hit. `pickFolder` now releases the previous library URI (if different)
+before storing the new one.
+
+### Bug 10 - "Fetch info" results could be applied to a novel no longer on screen
+
+**Status: fixed.** The lookup outlives the fiction page, and its dialog is a top-level
+overlay, so backing out and opening another fiction made the result appear over it - and
+choosing a candidate wrote the metadata to the *original* novel. Results/Error are now only
+shown and applied while that same novel's page is the current screen, otherwise dropped.
+
+### Also
+
+- Reader: the "back to fiction" row now carries an `onClickLabel` so screen readers say what it does.
+- CI now runs `testDebugUnitTest`; `junit` is a `testImplementation` dependency.
+
+### Needs an on-device check
+
+- Bug 7's forced open on a real downgrade (install a higher-versioned build, then this one over it).
+- Bug 5/8 with a revoked SAF grant: the chapter error screen, and that no novel is deleted.
+
+### Files touched this stage
+- `data/ScannerImpl.kt`, `data/ScanReconcile.kt` (new), `data/AppDatabase.kt`, `data/DatabaseDowngradeException.kt` (new), `data/ChapterContentRepository.kt`
+- `MainActivity.kt`, `ui/ChapterLoadErrorScreen.kt` (new), `ui/ReaderScreen.kt`
+- `app/build.gradle.kts`, `.github/workflows/build.yml`, `app/src/test/.../ScanReconcileTest.kt` (new)

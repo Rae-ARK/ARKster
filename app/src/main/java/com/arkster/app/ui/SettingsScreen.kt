@@ -38,8 +38,10 @@ import androidx.compose.ui.unit.sp
 import com.arkster.app.BuildConfig
 import com.arkster.app.data.Theme
 
-// Small uppercase, letter-spaced label above each grouped card (PREFERENCES / LEGAL /
-// ABOUT), so the index page reads as sections instead of one flat list.
+// Small uppercase, letter-spaced label used above each grouped card
+// (PREFERENCES / LEGAL / ABOUT) so this screen reads as sections instead of
+// one long undifferentiated list - lifted from ARKarium's SettingsScreen,
+// same idiom.
 @Composable
 private fun SettingsSectionLabel(text: String) {
     Text(
@@ -51,6 +53,14 @@ private fun SettingsSectionLabel(text: String) {
     )
 }
 
+// A round, tinted "badge" behind a row's leading icon. Circular icon badges
+// like this are what turn a settings row from "a line of text with a glyph
+// in front of it" into something that actually looks designed - the tinted
+// circle gives the icon room to breathe and a splash of the app's primary
+// color instead of a flat monochrome glyph sitting directly on the row
+// background. Lifted from ARKarium's SettingsIconBadge; colors come from
+// ARKster's own theme tokens (see ui/theme/AppTheme.kt), so this reads as
+// ARKster's forest-green brand, not ARKarium's teal.
 @Composable
 private fun SettingsIconBadge(icon: ImageVector) {
     Box(
@@ -68,6 +78,13 @@ private fun SettingsIconBadge(icon: ImageVector) {
     }
 }
 
+// A tappable, badge-and-chevron settings row - used for Theme, Library
+// (rescan / pick a folder), the two Legal rows, and About Me, all of which
+// either perform an action or navigate to their own screen (ThemeSettingsScreen,
+// LegalDocumentScreen, AboutScreen) rather than doing anything inline here.
+// `showDivider` draws the hairline that separates it from the next row in the
+// same card - omitted after the last row so the card's own rounded bottom
+// edge is the visual stop instead of a divider running right up against it.
 @Composable
 private fun SettingsCardRow(
     icon: ImageVector,
@@ -114,6 +131,11 @@ private fun SettingsCardRow(
     }
 }
 
+// One rounded, tinted card wrapping a whole section's rows - the same
+// "surfaceVariant Card" idiom ARKarium's SettingsCard uses, reused here so
+// grouped settings feel consistent with the rest of ARKster's visual
+// language (LegalDocumentScreen's section cards use the same idiom) rather
+// than inventing a new style.
 @Composable
 private fun SettingsCard(content: @Composable () -> Unit) {
     Card(
@@ -134,7 +156,9 @@ private fun SettingsCard(content: @Composable () -> Unit) {
 // already uses: Theme now opens its own ThemeSettingsScreen (with the new System
 // Default option), and a new About Me row opens AboutScreen. Library stays a direct
 // action row here rather than a drill-down page, since "rescan" / "pick a folder" is
-// a one-tap action, not a set of options to choose between.
+// a one-tap action, not a set of options to choose between. Presentation (section
+// labels, icon-badged rows, grouped cards) is lifted from ARKarium's SettingsScreen,
+// same idiom, restyled onto ARKster's own settings.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
@@ -169,7 +193,7 @@ fun SettingsScreen(
                 )
                 SettingsCardRow(
                     icon = Icons.Filled.FolderOpen,
-                    title = if (hasLibrary) "Rescan Library" else "Select Library Folder",
+                    title = "Library",
                     subtitle = if (hasLibrary) {
                         "Check your library folder for new or changed chapters"
                     } else {
@@ -212,10 +236,10 @@ fun SettingsScreen(
 
             Divider(modifier = Modifier.padding(top = 12.dp, bottom = 12.dp))
 
-            // BuildConfig.VERSION_NAME - the single source of truth for the app's
-            // version, also read by the crash screens and LegalDocumentScreen. Stays
-            // on the index page; it's not really "a setting" so it doesn't get its
-            // own sub-page.
+            // BuildConfig.VERSION_NAME is generated from app/build.gradle.kts'
+            // defaultConfig.versionName - the single source of truth for the app's
+            // version. This is the only place in the running app's normal UI that
+            // shows it; the crash screens in MainActivity read the same field.
             Text(
                 "ARKster v${BuildConfig.VERSION_NAME}",
                 style = MaterialTheme.typography.bodySmall,

@@ -19,8 +19,8 @@ android {
         // there's exactly one place to bump per release. Static docs (README.md,
         // app/README.md) can't read a Gradle value at doc-render time and are kept in
         // sync by hand - bump those alongside this when you bump here.
-        versionCode = 2
-        versionName = "0.2"
+        versionCode = 3
+        versionName = "0.3"
     }
 
     buildFeatures {
@@ -163,5 +163,9 @@ dependencies {
 
     // DocumentFile
     implementation("androidx.documentfile:documentfile:1.0.1")
+
+    // Plain JVM unit tests for the pure logic (see ScanReconcileTest). No Robolectric /
+    // instrumented setup on purpose - only code with no Android types is covered.
+    testImplementation("junit:junit:4.13.2")
 }
 

@@ -59,6 +59,11 @@ jobs:
           -keystore debug.keystore -storepass android -alias androiddebugkey \
           | grep -E "SHA1:|SHA256:"
 
+    # From release: run the unit test suite as its own step/log, separate from
+    # assembleDebug above.
+    - name: Unit tests
+      run: ./gradlew testDebugUnitTest --stacktrace 2>&1 | tee -a build-output.log
+
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4
       with:

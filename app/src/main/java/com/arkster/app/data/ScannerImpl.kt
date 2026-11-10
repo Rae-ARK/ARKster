@@ -74,7 +74,13 @@ class ScannerImpl(private val context: Context) {
         // (if any) has been parsed and before novel folders are iterated - callers do
         // the actual DB upsert/stale-removal themselves, same "ScannerImpl never holds
         // a db reference in scanRoot" style already used for onDiscovered above.
-        onAuthorsDiscovered: suspend (List<AuthorEntity>) -> Unit = {},
+        //
+        // The Boolean is true only when an authors/ folder actually exists at the root -
+        // distinct from the list being empty, which is also true when the folder exists
+        // but holds no profiles. A pass that couldn't find authors/ at all (transient SAF
+        // hiccup) must not be read as "every author was deleted" - see
+        // MainActivity.startScan.
+        onAuthorsDiscovered: suspend (List<AuthorEntity>, Boolean) -> Unit = { _, _ -> },
         // Fired exactly once, only after the full children loop below has finished a
         // genuine, uninterrupted pass (i.e. NOT on the early SecurityException/
         // "folder no longer accessible" returns above it, and not per-child - a single
@@ -83,7 +89,22 @@ class ScannerImpl(private val context: Context) {
         // against the DB - see MainActivity.startScan's seenNovelIds. Firing this on a
         // partial/aborted scan would let a transient SAF error wipe the entire library
         // instead of just leaving it stale until the next successful scan.
-        onScanCompleted: suspend () -> Unit = {},
+        //
+        // The Boolean is true when the (post-authors/-filter) listing contained at least
+        // one directory, regardless of whether building or upserting it later succeeded.
+        // `false` should be read as "this listing may have failed", not "the library now
+        // has zero novels" - a SAF provider can return an empty cursor while still
+        // fetching, and nothing in listFiles()'s return value tells that apart from a
+        // folder that really has no children. See ScanReconcile.decideStaleNovels.
+        onScanCompleted: suspend (sawAnyNovelFolders: Boolean) -> Unit = {},
+        // Fired for every directory child found in the listing, BEFORE any I/O that can
+        // fail for that novel specifically (readLocalMetadata, findCoverUri, and
+        // everything the caller's own onDiscovered does: merge, upsert, chapter scan).
+        // Lets the caller mark the folder "seen" the moment it is found, instead of only
+        // after its whole per-novel pipeline succeeds - otherwise a novel that throws
+        // anywhere downstream of being found is indistinguishable, at onScanCompleted,
+        // from one whose folder was really deleted.
+        onNovelFolderSeen: suspend (novelId: String) -> Unit = {},
         onProgress: suspend (current: Int, total: Int, message: String) -> Unit = { _, _, _ -> }
     ) = withContext(Dispatchers.IO) {
         // Everything below touches the Storage Access Framework, which throws
@@ -112,7 +133,7 @@ class ScannerImpl(private val context: Context) {
                     onProgress(0, 0, message)
                 }
             } else emptyList()
-            onAuthorsDiscovered(discoveredAuthors)
+            onAuthorsDiscovered(discoveredAuthors, authorsFolder != null)
             val authorsById = discoveredAuthors.associateBy { it.id }
             // Fallback lookup for fictions that set a free-text `author` but no
             // `authorId` - first author with a given normalized name wins ties, same as
@@ -125,12 +146,18 @@ class ScannerImpl(private val context: Context) {
                 // it as a novel folder even though it lives at the same level.
                 .filterNot { it.isDirectory && it.name?.equals("authors", ignoreCase = true) == true }
             val total = children.size
+            var sawAnyNovelFolders = false
             children.forEachIndexed { index, child ->
                 onProgress(index + 1, total, "Scanning ${child.name}...")
                 if (child.isDirectory) {
+                    sawAnyNovelFolders = true
+                    // Pure URI hashing, no I/O - so this can't itself be the thing that
+                    // fails. Marked seen before the try block so a throw anywhere inside
+                    // still leaves this id recorded as "this novel exists".
+                    val id = novelIdFor(treeUri, child)
+                    onNovelFolderSeen(id)
                     try {
                         val title = child.name ?: "Unknown"
-                        val id = UUID.nameUUIDFromBytes((treeUri.toString() + ":" + child.uri.toString()).toByteArray()).toString()
                         val coverUri = findCoverUri(child)
                         // Optional per-novel metadata.json in the novel's own folder, next to
                         // cover.* and the chapter/arc folders - see readLocalMetadata() for the
@@ -162,7 +189,7 @@ class ScannerImpl(private val context: Context) {
                     }
                 }
             }
-            onScanCompleted()
+            onScanCompleted(sawAnyNovelFolders)
             onProgress(total, total, "Scan complete")
         } catch (e: SecurityException) {
             onProgress(0, 0, "Lost access to the library folder - please reselect it")
@@ -170,6 +197,13 @@ class ScannerImpl(private val context: Context) {
             onProgress(0, 0, "Scan failed: ${e.message}")
         }
     }
+
+    // Pure URI hashing, no I/O. Pulled out so scanRoot can compute a novel's id (to fire
+    // onNovelFolderSeen) before running any of that novel's own I/O, with the same
+    // derivation the rest of the scan uses - the two can never drift into different ids
+    // for the same folder.
+    private fun novelIdFor(treeUri: Uri, child: DocumentFile): String =
+        UUID.nameUUIDFromBytes((treeUri.toString() + ":" + child.uri.toString()).toByteArray()).toString()
 
     suspend fun scanChaptersForNovel(
         novelFolder: DocumentFile,
