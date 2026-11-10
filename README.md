@@ -8,6 +8,29 @@ Key points:
 - Start with `txt`/`md` support; EPUB and PDF are planned in later milestones.
 - No accounts, no syncing, metadata downloads are opt-in and cached locally.
 
+## The ARK ecosystem
+
+| App | Platform | Who it's for | License |
+|---|---|---|---|
+| **ARKster** (this repo) | Android | Anyone with a folder of novels | GPLv3 |
+| [ARKium](https://github.com/Rae-ARK/arkium) | Desktop (C, GTK 4/libadwaita) | Anyone with a folder of novels | GPLv3 |
+| [ARKarium](https://github.com/Rae-ARK/arkarium) | Android | Readers of Rae ARK's own novels | Proprietary |
+
+ARKster's role is the **general-purpose** one: a local, offline reader for *your
+own* folder of novels, with no author-distribution or sync features — that's a
+deliberate scope limit, not a missing feature. ARKarium is a separate,
+proprietary app built for one author's readers; its own docs say its scanner,
+sort-tier, and author-page logic were carried over from ARKster, but it then
+adds things that are specifically out of scope here — relay sync from a fixed
+distribution point, new-chapter notifications, per-chapter read-event stats,
+and character-aware TTS. ARKium is the desktop sibling: same general-purpose
+scope and folder conventions as ARKster, just a different platform. A
+desktop-as-full-library / phone-as-curated-subset sync between ARKium and
+ARKster is a *planned* direction for ARKium, not a current feature of either
+app. For a detailed, field-by-field comparison of ARKster's and ARKarium's
+folder conventions and data models (current as of a dated snapshot), see
+[ARKium's Android reference doc](https://github.com/Rae-ARK/arkium/blob/main/docs/foundation/ANDROID_REFERENCE.md).
+
 ## Current status
 **v0.2** — see `app/build.gradle.kts`'s `versionName`, the single source of truth the
 app itself reads back via `BuildConfig.VERSION_NAME` (shown in Settings and on the

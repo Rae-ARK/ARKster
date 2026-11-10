@@ -8,6 +8,23 @@ Purpose: a compact, practical Android-first design that implements the Royal Roa
 - The folder is a source of truth; Room is the indexed representation and query surface.
 - Keep EPUB/PDF complexity confined to the data layer; UI consumes a normalized model.
 
+## Scope: what ARKster is (and isn't)
+ARKster is the general-purpose reader in the ARK family — see the repo
+[README](../README.md#the-ark-ecosystem) for the full ecosystem table. Two
+siblings exist, and features belonging to them stay out of this design:
+
+- **ARKarium** (separate, proprietary app for one author's readers) owns
+  author→reader relay sync, new-chapter notifications, per-chapter read-event
+  stats, and character-aware TTS. It forked ARKster's scanner, sort-tier, and
+  author-page logic, so bugfixes there are worth back-porting (see
+  `docs/bugs.md`, Stage 6) — but new author-distribution features are not.
+- **ARKium** (desktop sibling, same folder model) owns any future
+  desktop-as-library / phone-as-subset backup sync. Nothing here should assume
+  that sync exists yet; as of this doc it doesn't.
+
+ARKster itself stays local-only and account-free per the Principles above:
+one root folder, indexed on-device, no network dependency for core reading.
+
 ## Quick overview
 - App name: ARKster (case sensitive)
 - Platform: Android native (Kotlin + Jetpack Compose)
