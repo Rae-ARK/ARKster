@@ -8,6 +8,7 @@ import androidx.activity.compose.setContent
 import com.arkster.app.BuildConfig
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -29,6 +30,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
+import com.arkster.app.ui.AboutScreen
 import com.arkster.app.ui.ChapterEditorScreen
 import com.arkster.app.ui.AuthorPageScreen
 import com.arkster.app.ui.HomeScreen
@@ -38,6 +40,7 @@ import com.arkster.app.ui.MetadataSearchDialog
 import com.arkster.app.ui.NovelDetailScreen
 import com.arkster.app.ui.ReaderScreen
 import com.arkster.app.ui.SettingsScreen
+import com.arkster.app.ui.ThemeSettingsScreen
 import com.arkster.app.ui.SplashScreen
 import com.arkster.app.ui.FictionBrowseScreen
 import com.arkster.app.data.AppDatabase
@@ -69,6 +72,11 @@ sealed class Screen {
     // card) instead of always landing back on Home.
     data class Author(val authorId: String, val from: Screen) : Screen()
     object Settings : Screen()
+    // Settings used to apply the Theme radio group inline on itself; now its own
+    // destination, part of turning Settings into an index (see SettingsScreen.kt).
+    object ThemeSettings : Screen()
+    // New - Settings previously had no "About" entry at all (see AboutScreen.kt).
+    object AboutMe : Screen()
     object FictionBrowse : Screen()
     object PrivacyPolicy : Screen()
     object TermsAndConditions : Screen()
@@ -107,7 +115,28 @@ private fun colorSchemeFor(theme: Theme) = when (theme) {
     Theme.LIGHT -> lightColorScheme()
     Theme.DARK -> darkColorScheme()
     Theme.WARM_PAPER -> warmPaperColorScheme()
+    // Never actually reached - resolveTheme() below always substitutes SYSTEM_DEFAULT
+    // for a concrete Light/Dark theme before colorSchemeFor is called. Kept as an
+    // exhaustive branch (falls back to the same lightColorScheme() Theme.LIGHT uses)
+    // rather than `else`, so adding a future Theme case fails to compile here instead
+    // of silently falling through.
+    Theme.SYSTEM_DEFAULT -> lightColorScheme()
 }
+
+// Resolves "follow system theme" down to a concrete Light/Dark theme based on the
+// device's own day/night setting. System Default has no palette of its own - it
+// borrows Dark at night and Light during the day - so every caller that needs an
+// actual color scheme or reading-mode palette (colorSchemeFor above, ReaderScreen's
+// appTheme) resolves through this first rather than switching on SYSTEM_DEFAULT
+// itself. Pulled out as a plain, Context-free function (same reasoning as the
+// sibling ARKarium reader's own resolveTheme) so it's usable outside a Composable
+// and easy to unit test later even though this module has no test source set yet.
+internal fun resolveTheme(theme: Theme, systemInDarkTheme: Boolean): Theme =
+    if (theme == Theme.SYSTEM_DEFAULT) {
+        if (systemInDarkTheme) Theme.DARK else Theme.LIGHT
+    } else {
+        theme
+    }
 
 class MainActivity : ComponentActivity() {
 
@@ -571,7 +600,13 @@ class MainActivity : ComponentActivity() {
 
     private fun renderMainContent() {
         setContent {
-            val colorScheme = colorSchemeFor(currentTheme.value)
+            // Read once per composition and reused everywhere a resolved (non-
+            // SYSTEM_DEFAULT) theme is needed below - the color scheme here and
+            // ReaderScreen's appTheme param at its call site - so both agree on the
+            // same light/dark resolution within a single frame.
+            val systemInDarkTheme = isSystemInDarkTheme()
+            val resolvedTheme = resolveTheme(currentTheme.value, systemInDarkTheme)
+            val colorScheme = colorSchemeFor(resolvedTheme)
             MaterialTheme(colorScheme = colorScheme) {
                 // The activity's manifest theme is static (always light), so without this
                 // the system status bar icons stay dark-on-dark whenever the user picks
@@ -636,6 +671,12 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize()
                 ) {
                     val savedUri = prefsManager.libraryUri.collectAsState(initial = null)
+                    // Reader font size/line height defaults - see PreferencesManager's
+                    // doc comment on READER_FONT_SIZE_KEY/READER_LINE_HEIGHT_KEY for why
+                    // these exist now. Read here (same collectAsState pattern as
+                    // savedUri above) and passed into ReaderScreen as its starting point.
+                    val readerFontSize = prefsManager.readerFontSize.collectAsState(initial = 18f)
+                    val readerLineHeight = prefsManager.readerLineHeight.collectAsState(initial = 1.8f)
 
                     when (currentScreen.value) {
                         is Screen.Home -> {
@@ -751,11 +792,24 @@ class MainActivity : ComponentActivity() {
                             ReaderScreen(
                                 chapter = reader.chapter,
                                 content = reader.content,
-                                appTheme = currentTheme.value,
+                                // resolvedTheme, not currentTheme.value directly - the reader's
+                                // own Light/Sepia/Dark palette seeds from the app theme (see
+                                // readingModeFor in ReaderScreen.kt), which has no SYSTEM_DEFAULT
+                                // case of its own; passing the already-resolved concrete theme
+                                // here keeps that seeding correct now that System Default exists.
+                                appTheme = resolvedTheme,
                                 novelTitle = novel?.title,
                                 arcTitle = arcTitle,
                                 coverUri = readerCoverUri,
                                 author = readerAuthor.value,
+                                initialFontSize = readerFontSize.value,
+                                initialLineHeight = readerLineHeight.value,
+                                onFontSizeChange = { size ->
+                                    lifecycleScope.launch { prefsManager.setReaderFontSize(size) }
+                                },
+                                onLineHeightChange = { height ->
+                                    lifecycleScope.launch { prefsManager.setReaderLineHeight(height) }
+                                },
                                 onBack = { progress ->
                                     lifecycleScope.launch {
                                         saveReadingProgress(reader.novelId, reader.chapter.id, progress)
@@ -838,11 +892,7 @@ class MainActivity : ComponentActivity() {
                             SettingsScreen(
                                 currentTheme = currentTheme.value,
                                 hasLibrary = savedUri.value != null,
-                                onThemeSelected = { theme ->
-                                    lifecycleScope.launch {
-                                        prefsManager.setTheme(theme)
-                                    }
-                                },
+                                onThemeClick = { currentScreen.value = Screen.ThemeSettings },
                                 onRescan = {
                                     val currentUri = savedUri.value
                                     if (currentUri != null) {
@@ -864,8 +914,25 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onPrivacyPolicy = { currentScreen.value = Screen.PrivacyPolicy },
                                 onTermsAndConditions = { currentScreen.value = Screen.TermsAndConditions },
+                                onAboutMe = { currentScreen.value = Screen.AboutMe },
                                 onBack = { currentScreen.value = Screen.Home }
                             )
+                        }
+
+                        is Screen.ThemeSettings -> {
+                            ThemeSettingsScreen(
+                                currentTheme = currentTheme.value,
+                                onThemeSelected = { theme ->
+                                    lifecycleScope.launch {
+                                        prefsManager.setTheme(theme)
+                                    }
+                                },
+                                onBack = { currentScreen.value = Screen.Settings }
+                            )
+                        }
+
+                        is Screen.AboutMe -> {
+                            AboutScreen(onBack = { currentScreen.value = Screen.Settings })
                         }
 
                         is Screen.PrivacyPolicy -> {

@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Brightness4
 import androidx.compose.material.icons.filled.Brightness7
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -69,6 +70,11 @@ private fun readingModeFor(theme: Theme): ReadingMode = when (theme) {
     Theme.LIGHT -> ReadingMode.LIGHT
     Theme.DARK -> ReadingMode.DARK
     Theme.WARM_PAPER -> ReadingMode.SEPIA
+    // Never actually reached - MainActivity always passes an already-resolved
+    // (non-SYSTEM_DEFAULT) theme into ReaderScreen's appTheme param (see its
+    // resolveTheme call at the ReaderScreen call site). Kept as an exhaustive
+    // branch rather than `else` for the same reason colorSchemeFor does.
+    Theme.SYSTEM_DEFAULT -> ReadingMode.LIGHT
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -93,6 +99,19 @@ fun ReaderScreen(
     // reads - see AUTHOR_PAGE_AND_CHAPTER_REDESIGN.md's Stage 3 section. Null renders no
     // "About the author" card at all, same as a fiction with no linked author today.
     author: AuthorEntity? = null,
+    // Font size/line height used to be `remember` state seeded from a hardcoded
+    // 18f/1.8f every single time - picking a size in the Reader Preferences pill
+    // never survived leaving the reader, let alone the next chapter. These two now
+    // seed from PreferencesManager's persisted defaults (see its READER_FONT_SIZE_KEY/
+    // READER_LINE_HEIGHT_KEY doc comment) instead, with onFontSizeChange/
+    // onLineHeightChange writing every change straight back through - no separate
+    // "live vs. default" split like the sibling ARKarium reader's pill/settings-page
+    // model, since ARKster's reader has no per-session reason to diverge from the
+    // stored default the way ARKarium's TTS rate does.
+    initialFontSize: Float = 18f,
+    initialLineHeight: Float = 1.8f,
+    onFontSizeChange: (Float) -> Unit = {},
+    onLineHeightChange: (Float) -> Unit = {},
     onBack: (Float) -> Unit,
     // Distinct from onBack: onBack is the existing top-app-bar arrow (goes to whatever
     // the caller currently sends it, e.g. Home); onBackToFiction is the new Royal
@@ -109,8 +128,8 @@ fun ReaderScreen(
     onNext: ((Float) -> Unit)? = null,
     onAuthorClick: () -> Unit = {}
 ) {
-    val fontSize = remember { mutableFloatStateOf(18f) }
-    val lineHeight = remember { mutableFloatStateOf(1.8f) }
+    val fontSize = remember { mutableFloatStateOf(initialFontSize) }
+    val lineHeight = remember { mutableFloatStateOf(initialLineHeight) }
     val readingMode = remember { mutableStateOf(readingModeFor(appTheme)) }
     val showControls = remember { mutableStateOf(true) }
     // Separate from showControls: showControls is the tap-anywhere immersive toggle
@@ -365,7 +384,12 @@ fun ReaderScreen(
                 ) {
                     Text("Text:", style = MaterialTheme.typography.labelSmall, color = textColor)
                     IconButton(
-                        onClick = { if (fontSize.value > 12) fontSize.value -= 2 },
+                        onClick = {
+                            if (fontSize.value > 12) {
+                                fontSize.value -= 2
+                                onFontSizeChange(fontSize.value)
+                            }
+                        },
                         modifier = Modifier.size(32.dp)
                     ) {
                         Icon(Icons.Default.Remove, contentDescription = "Decrease font", tint = textColor)
@@ -376,7 +400,12 @@ fun ReaderScreen(
                         color = textColor
                     )
                     IconButton(
-                        onClick = { if (fontSize.value < 28) fontSize.value += 2 },
+                        onClick = {
+                            if (fontSize.value < 28) {
+                                fontSize.value += 2
+                                onFontSizeChange(fontSize.value)
+                            }
+                        },
                         modifier = Modifier.size(32.dp)
                     ) {
                         Icon(Icons.Default.Add, contentDescription = "Increase font", tint = textColor)
@@ -393,7 +422,13 @@ fun ReaderScreen(
                     Text("Spacing:", style = MaterialTheme.typography.labelSmall, color = textColor)
                     Slider(
                         value = lineHeight.value,
+                        // Live-updates lineHeight.value on every drag frame (for the
+                        // slider's own responsiveness and the "x.x" readout beside it),
+                        // but only persists via onLineHeightChange in
+                        // onValueChangeFinished - a DataStore write per drag frame would
+                        // be a lot of disk churn for one slider drag.
                         onValueChange = { lineHeight.value = it },
+                        onValueChangeFinished = { onLineHeightChange(lineHeight.value) },
                         valueRange = 1.0f..2.5f,
                         steps = 10,
                         modifier = Modifier
@@ -440,22 +475,41 @@ fun ReaderScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.Center
                             ) {
+                                // Icon tint used to be hardcoded Color.White/Color.Black
+                                // regardless of which reading mode (or app theme) was
+                                // actually active - fine against Light's own Surface,
+                                // but the unselected Black icons were barely visible on
+                                // Dark theme's dark surfaceVariant, and Sepia used a bare
+                                // emoji instead of a real icon at all (mismatched with
+                                // the other two, and not tinted/sized consistently with
+                                // them either). All three now use one Material icon each,
+                                // tinted from the real color scheme like every other icon
+                                // on this screen: onPrimary when selected (sits on the
+                                // solid `primary` Surface above), textColor - the row's
+                                // own reading-mode-aware color - when not.
+                                val iconTint = if (readingMode.value == mode) {
+                                    MaterialTheme.colorScheme.onPrimary
+                                } else {
+                                    textColor
+                                }
                                 when (mode) {
                                     ReadingMode.LIGHT -> Icon(
                                         Icons.Default.Brightness7,
                                         contentDescription = "Light mode",
                                         modifier = Modifier.size(16.dp),
-                                        tint = if (readingMode.value == mode) Color.White else Color.Black
+                                        tint = iconTint
                                     )
-                                    ReadingMode.SEPIA -> Text(
-                                        "📖",
-                                        fontSize = 12.sp
+                                    ReadingMode.SEPIA -> Icon(
+                                        Icons.Default.MenuBook,
+                                        contentDescription = "Sepia mode",
+                                        modifier = Modifier.size(16.dp),
+                                        tint = iconTint
                                     )
                                     ReadingMode.DARK -> Icon(
                                         Icons.Default.Brightness4,
                                         contentDescription = "Dark mode",
                                         modifier = Modifier.size(16.dp),
-                                        tint = if (readingMode.value == mode) Color.White else Color.Black
+                                        tint = iconTint
                                     )
                                 }
                             }
