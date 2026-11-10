@@ -45,6 +45,27 @@ android {
     ).all { !it.isNullOrBlank() }
 
     signingConfigs {
+        // Committed debug.keystore at the repo root, standard well-known debug
+        // credentials - storePassword/keyPassword "android" and alias
+        // "androiddebugkey" are the same ones AGP's own auto-generated debug
+        // keystore uses, they're not a secret. Without an explicit debug
+        // signingConfig, AGP falls back to ~/.android/debug.keystore on whatever
+        // machine or CI runner happens to run the build - auto-generated with a
+        // random key the first time it's missing, which it always is on a fresh
+        // GitHub Actions runner. That means every local dev machine, and every
+        // single CI run, was signing debug APKs with its own different key:
+        // installing a CI-built APK over a locally-built one (or one CI run's
+        // artifact over another's) failed with "App not installed - package
+        // conflicts with an existing package" unless you uninstalled first.
+        // Pointing every build at this one checked-in file instead - same
+        // pattern the sibling ARKarium reader already uses for itself - makes
+        // every debug build's signature the same, everywhere it's built.
+        getByName("debug") {
+            storeFile = file("$rootDir/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
         if (hasReleaseSigning) {
             create("release") {
                 storeFile = file(releaseStoreFile!!)
@@ -56,6 +77,9 @@ android {
     }
 
     buildTypes {
+        getByName("debug") {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         getByName("release") {
             if (hasReleaseSigning) {
                 signingConfig = signingConfigs.getByName("release")

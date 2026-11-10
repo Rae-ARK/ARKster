@@ -44,6 +44,21 @@ jobs:
       # still fails correctly if the build fails.
       run: ./gradlew assembleDebug --stacktrace 2>&1 | tee build-output.log
 
+    # Debug builds now sign with the committed debug.keystore (see
+    # app/build.gradle.kts's signingConfigs.debug) instead of AGP's old
+    # implicit fallback to ~/.android/debug.keystore - which this runner,
+    # fresh every job, would've regenerated with a brand new random key on
+    # every single run. Every CI-built debug APK, and every local build from
+    # that same debug.keystore, should now carry one identical signature.
+    # Printed here as a plain log line, not a pass/fail check, so that's
+    # directly verifiable from the Actions log instead of having to pull the
+    # artifact down and run apksigner/keytool yourself to confirm it.
+    - name: Print debug APK signing fingerprint
+      run: |
+        keytool -list -v \
+          -keystore debug.keystore -storepass android -alias androiddebugkey \
+          | grep -E "SHA1:|SHA256:"
+
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4
       with:
