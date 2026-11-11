@@ -56,23 +56,6 @@ reconciles deleted novels correctly (see
 
 APK outputs: `app/build/outputs/apk/debug/` or `app/build/outputs/apk/release/`
 
-## GitHub Actions CI
-Push to `main`, `develop`, or `release` branches to trigger automatic debug APK builds. Artifacts are available on the Actions tab.
-
-## Releases (sideload only - no Play Store listing)
-Trigger the "Build Release APK" workflow manually from the Actions tab
-(`workflow_dispatch`) to produce a signed `ARKster-<version>-release.apk`.
-Requires four repo secrets first (Settings → Secrets and variables →
-Actions): `ARKSTER_KEYSTORE_BASE64` (your keystore file, base64-encoded),
-`ARKSTER_RELEASE_STORE_PASSWORD`, `ARKSTER_RELEASE_KEY_ALIAS`,
-`ARKSTER_RELEASE_KEY_PASSWORD`. Without them the workflow still runs but
-produces an unsigned APK.
-Download it from the run's artifacts, then on the device: Settings → allow
-installing apps from your file manager/browser (the exact toggle wording
-varies by Android version), and open the APK to install. Since this isn't
-distributed through Play Protect's usual channel, Android may show an
-"unknown source" warning on first install - that's expected for sideloaded
-apps and not a sign anything is wrong.
 
 ## Documentation
 Docs live in [`docs/arkster/`](docs/arkster/README.md), organised by
