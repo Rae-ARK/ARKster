@@ -1,5 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.arkster.app">
+    package="horizonarkstudio.raeark.arkster">
 
     <!-- Needed for the "Fetch info" metadata lookup (Google Books API) and for loading
          remote cover thumbnails via Coil. The app is otherwise fully offline. -->
@@ -16,7 +16,7 @@
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
-        <activity android:name="com.arkster.app.MainActivity"
+        <activity android:name="horizonarkstudio.raeark.arkster.MainActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
