@@ -1,0 +1,271 @@
+# OOP modular-monolith refactor (staged plan)
+
+## Status
+
+**Stage 0 — documentation. Done.** Stages 1–7 below are not started. No
+app code has been touched yet.
+
+## Motivation
+
+ARKster's ~6,800 lines of Kotlin (23 files) are organized by *layer*
+(`data/`, `ui/`) rather than by *feature*, and two files have grown into
+god objects:
+
+- **`MainActivity.kt`, 1,041 lines.** Every piece of UI state — `novels`,
+  `chapters`, `arcs`, `currentScreen`, `scanProgress`,
+  `metadataSearchState`, `readerAuthor`, and a dozen more — is a raw
+  `mutableStateOf`/`mutableStateListOf` field directly on the `Activity`.
+  Navigation is a sealed `Screen` plus an inline `when` inside
+  `setContent`. Scan orchestration, metadata search/apply, crash
+  rendering, and reader Previous/Next resolution all live here too,
+  alongside the Compose tree itself.
+- **`ScannerImpl.kt`, 648 lines.** One class does folder traversal, arc
+  detection, chapter-filename parsing (a ranked list of heuristics),
+  fingerprinting, cover resolution, `metadata.json` reading, and the
+  whole `authors/` folder + avatar resolution pass.
+
+### The config-change/process-death gap this causes
+
+`AndroidManifest.xml` declares no `configChanges` for `MainActivity`, and
+there is no `ViewModel` anywhere in the app — so every field listed above
+lives and dies with the `Activity` instance. A rotation destroys and
+recreates it from scratch: in-flight scan progress, the metadata-search
+dialog state, and reader position all vanish and must be reloaded or
+re-derived, because nothing was scoped to survive the recreation in the
+first place. This is a real, user-visible gap, not a style complaint, and
+closing it is as much a goal of this refactor as the directory
+reorganization is.
+
+### A second gap this refactor surfaces: `BookSource` isn't real yet
+
+[`architecture.md`](../foundational/architecture.md) and
+[`epub-support.md`](epub-support.md) both describe a `BookSource`
+interface (`FolderSource`/`EpubSource`/`PdfSource`) with `architecture.md`
+marking `FolderSource` **"shipped."** It isn't: searching `app/` for
+`BookSource` or `FolderSource` turns up nothing but a comment in
+`ScannerImpl.kt` ("Scanner implementation for FolderSource-like
+behavior"). The actual interface only exists as an unwired proof-of-concept
+under `spec/android_poc/src/main/kotlin/arkster/data/BookSource.kt`,
+never imported by `app/`. `architecture.md`'s claim is corrected as part
+of this patch (see "Files touched this stage" below) — this refactor is
+what makes it true.
+
+## Scope: directory structure, not features
+
+This is a **pure internal restructuring**. No screen gains or loses a
+feature, no visible behavior changes, and (outside of the `BookSource`
+seam itself) no database schema changes. The deliverable is a codebase
+organized **by feature, not by layer** — a modular monolith: one
+deployable app, but with the internal seams a real module boundary would
+have, so a feature's code, state, and tests live together instead of
+being split across `data/`/`ui/` and reassembled inside `MainActivity`.
+`MainActivity` ends this refactor as what its name always implied and
+never was: a thin entry point/index that hosts navigation and nothing
+else.
+
+### Target package layout (Stage 1)
+
+```
+com.arkster.app/
+  App.kt                       <- new Application class; owns app-scoped singletons
+  MainActivity.kt               <- thin: NavHost + splash gate, nothing else
+  core/
+    database/                   <- AppDatabase, Dao.kt, Entities.kt, DatabaseDowngradeException.kt
+    datastore/                  <- PreferencesManager.kt
+    design/                     <- theme/AppTheme.kt moved here
+    navigation/                 <- Screen.kt, the Mediator-style nav coordinator
+  domain/
+    booksource/                 <- BookSource.kt, FolderSource.kt (real, not spec/'s stub),
+                                    EpubSource.kt once epub-support.md ships
+    repository/                 <- NovelRepository, ChapterRepository, AuthorRepository
+  scanner/                      <- ScannerImpl decomposed (see Stage 4)
+  feature/
+    home/                       <- HomeScreen.kt + HomeViewModel.kt
+    library/                    <- legacy direct-scan entry point
+    browse/                     <- FictionBrowseScreen.kt + ViewModel
+    noveldetail/                <- NovelDetailScreen.kt, ChapterEditorScreen.kt + ViewModel
+    reader/                     <- ReaderScreen.kt, ChapterLoadErrorScreen.kt + ViewModel
+    author/                     <- AuthorPageScreen.kt + ViewModel
+    settings/                   <- SettingsScreen.kt, ThemeSettingsScreen.kt, AboutScreen.kt,
+                                    LegalDocumentScreen.kt, LegalContent.kt + ViewModel
+    splash/                     <- SplashScreen.kt
+```
+
+This is a **package reorganization inside the existing single `app`
+Gradle module** — not a split into separate Gradle modules. See "Open
+questions" for why that bigger step isn't committed to here.
+
+## Design decisions, mapped to the GoF patterns actually demonstrated in
+[`docs/kotlin-design-patterns`](../../kotlin-design-patterns/README.md)
+
+Every pattern below has a working Kotlin example in that vendored repo;
+nothing here reaches for a pattern it doesn't also demonstrate.
+
+- **Facade** — `ScannerImpl` becomes a thin facade in front of focused
+  collaborators (`ChapterTitleParser`, `CoverResolver`, `AuthorScanner`,
+  `FingerprintCalculator`), each independently testable, instead of one
+  648-line class owning all of it.
+- **Chain of Responsibility** — `parseChapter`'s ranked heuristics
+  (leading number, `Chapter N` prefix, pure numeric filename, filename
+  tokenization fallback) already *are* a chain; today they're inlined
+  sequential checks instead of composed handler objects. Formalizing this
+  means the same chain can be reused for EPUB's NCX/nav-title fallback
+  matching (`epub-support.md`'s sort-tier section), instead of that plan
+  writing its own copy.
+- **Builder** — the existing-vs-scanned-vs-override merge in
+  `ScannerImpl.scanChaptersForNovel` (today, long `copy()` calls with
+  inline comments explaining field-by-field precedence) becomes one
+  `NovelMergeBuilder`/`ChapterMergeBuilder` owning those rules in one
+  place.
+- **Abstract Factory** + **Bridge** — a `BookSourceFactory` produces the
+  matching *family* of collaborators for a source type
+  (`BookSource` + `ChapterContentRepository` + `CoverResolver` together),
+  replacing the ad hoc URI-scheme dispatch `epub-support.md` currently
+  proposes (`epub://...` parsed by a string-scheme check). The abstraction
+  (what the reader needs — chapter content) stays decoupled from the
+  implementation hierarchy (plain file vs. zip entry vs., later, a PDF
+  page) via Bridge, the way `ChapterContentRepository` already gestures at
+  but doesn't yet formalize.
+- **Adapter** — platform/third-party types (SAF `DocumentFile` today; a
+  future EPUB-parsing library, per `epub-support.md`'s open question 4)
+  stay behind a stable internal interface instead of leaking into the
+  scanner directly.
+- **Observer** — per-feature `ViewModel`s expose `StateFlow`, observed via
+  `collectAsStateWithLifecycle`, replacing `MainActivity`'s raw
+  `mutableStateOf` fields as the single observable source of UI state.
+- **Memento** — `SavedStateHandle` on each `ViewModel` snapshots the state
+  that must survive process death (not just a config change): current
+  screen args, in-flight metadata-search state, scan progress.
+- **Singleton** — `db`, `scanner`, `prefsManager`, `contentRepo`, and
+  `metadataProvider` move from `MainActivity` `lateinit var`s (rebuilt
+  every recreation) to a new `App : Application` owning them once for the
+  process's lifetime — see Stage 2, which lands before any `ViewModel`
+  exists and already closes part of the config-change gap on its own.
+- **Mediator** — a navigation coordinator (or Jetpack Navigation-Compose's
+  `NavHost`, see "Open questions") replaces `MainActivity`'s inline
+  `when (currentScreen.value)` branching, so screens stop reaching into
+  shared Activity-held state to navigate each other.
+- **State** — `Screen`'s sealed-class cases already resemble the State
+  pattern; today the transition logic and each state's own behavior are
+  both jammed into `MainActivity`'s Compose body instead of living with
+  the state. Tightens naturally alongside the Mediator-based coordinator.
+- **Composite** — the Arc→Chapter nesting ("All Chapters" is a flattened
+  composite view across arcs) and, later, an EPUB NCX/nav tree
+  (`epub-support.md` Stage 4's "deeply nested nav trees" question) are
+  both naturally Composite structures.
+- **Decorator** — `ChapterOverrideEntity` layering a title/position change
+  on top of a scanned chapter without touching the scanned row is
+  conceptually a Decorator; worth stating explicitly rather than leaving
+  it as an unnamed convention.
+- **Proxy** — cache-on-first-access resolution (today: cover/avatar URIs;
+  soon: `epub-support.md`'s planned cover-extraction-to-cache step) is a
+  caching Proxy in front of the real source (zip bytes, SAF query).
+- **Visitor** — *not scheduled.* Flagged only as a candidate for a future
+  cross-cutting tree operation (e.g. the still-open "Total Words" stat in
+  [`author-and-reader-model.md`](../foundational/author-and-reader-model.md)).
+  Nothing in the current codebase needs it yet; listed here so it isn't
+  silently forgotten when that need shows up.
+
+## Different from ARKarium, on purpose
+
+ARKarium forked ARKster's scanner, sort-tier, and author-page logic early
+(see [`what-is-arkster.md`](../foundational/what-is-arkster.md)) and has
+since layered its own priorities on top — relay sync, notifications,
+per-chapter read-event stats, character-aware TTS — on a codebase that has
+already diverged from this one. This refactor is **not** meant to be
+back-ported to ARKarium or kept in lockstep with it. Bugfixes to shared
+logic are still worth porting there (per the existing policy); a purely
+internal reorganization of *this* repo's directory structure is not.
+
+## Staging order
+
+### Stage 0 — Documentation. Done.
+This file, plus the `architecture.md` correction noted below. No app code
+touched.
+
+### Stage 1 — Directory/package reorganization. Not started.
+Move files into the target layout above. Pure `git mv` plus package-name
+updates — no logic changes, no behavior changes. `MainActivity.kt` is not
+yet thin at the end of this stage (that's Stage 3); this stage only
+establishes where things live.
+
+### Stage 2 — Application-scoped services (Singleton). Not started.
+New `App : Application` owns `db`/`scanner`/`prefsManager`/`contentRepo`/
+`metadataProvider` for the process's lifetime, constructed once instead of
+in `MainActivity.onCreate`. This alone stops those services churning on
+every rotation, ahead of any `ViewModel` work.
+
+### Stage 3 — Per-feature ViewModels (Observer + Memento + Mediator + State). Not started.
+One `ViewModel` per `feature/` package, each exposing `StateFlow`/`State`
+and backed by `SavedStateHandle` for anything that must survive process
+death. `MainActivity`'s `when`-based navigation becomes a coordinator
+(Mediator) wired to these ViewModels. This is the stage that actually
+closes the config-change/process-death gap described above and shrinks
+`MainActivity` down to its intended thin-entry-point shape.
+
+### Stage 4 — `ScannerImpl` decomposition (Facade + Chain of Responsibility + Builder). Not started.
+Split into the thin facade plus `ChapterTitleParser`, `CoverResolver`,
+`AuthorScanner`, `FingerprintCalculator`, and a merge `Builder`, as
+described above. Same inputs and outputs as today; different internal
+seams.
+
+### Stage 5 — Real `BookSource`/`ChapterContentRepository` (Abstract Factory + Bridge + Adapter). Not started.
+Promote `spec/android_poc`'s stub into `domain/booksource/`, implement
+`FolderSource` for real against the scanning logic from Stage 4, and add
+the `BookSourceFactory`. Corrects `architecture.md`'s "shipped" claim for
+real. `epub-support.md`'s own Stage 1 should land against this seam
+instead of inventing its own URI-scheme dispatcher, if this stage ships
+first; if EPUB support starts first instead, its dispatcher gets absorbed
+into the factory here rather than the other way around. Whichever lands
+first, the other plan's corresponding stage should be re-read before it
+starts.
+
+### Stage 6 — Repository layer over `Dao` (Repository + Proxy). Not started.
+`NovelRepository`/`ChapterRepository`/`AuthorRepository` wrap the existing
+`Dao`s as the single source of truth `ViewModel`s depend on — nothing
+above `domain/` touches a `Dao` directly after this stage. Cover/avatar
+cache-on-first-access becomes an explicit Proxy.
+
+### Stage 7 — QA / polish. Not started.
+Rotate every screen; kill the process via "Don't keep activities" while
+backgrounded; confirm state survives via `SavedStateHandle` and that
+`StateFlow` resubscribes correctly; confirm the Stage 2 singletons aren't
+duplicated; confirm `epub-support.md`'s plan still applies cleanly against
+whichever of Stage 5/EPUB landed second.
+
+## Explicitly out of scope
+
+- **Any new user-facing feature or visible behavior change.** This plan
+  only moves and reshapes code.
+- **A Gradle multi-module split** (separate `:core`, `:domain`,
+  `:feature:*` build modules with real build-time boundaries, build-time
+  parallelization, etc.) — see "Open questions."
+- **Database schema changes**, except whatever Stage 6's repository
+  extraction incidentally requires at the call-site level; no new Room
+  migration is expected.
+- **Adopting a DI framework** (Hilt/Koin) — see "Open questions."
+
+## Open questions
+
+1. Hand-rolled `Application`-scoped singletons (Stage 2) vs. a DI
+   framework (Hilt/Koin)? Leaning hand-rolled — the app is currently
+   single-module and small enough that a new build dependency isn't
+   obviously worth it yet. Revisit if `feature/` modules multiply enough
+   that manual wiring gets unwieldy.
+2. Package-by-feature within the single `app` module (as staged above) vs.
+   true Gradle multi-module separation? This plan deliberately starts with
+   the former — lower risk, no build-script changes, reversible. A real
+   module split is a plausible future follow-on, not committed to here.
+3. Hand-rolled `Screen` sealed class + Mediator coordinator (what Stage 3
+   assumes) vs. migrating to Jetpack Navigation-Compose's `NavHost`/
+   `NavController`? The latter is more idiomatic and gets deep-linking for
+   free, but is a bigger one-time rewrite of every navigation call site.
+   Needs a decision before Stage 3 starts.
+4. Where would Visitor actually earn its place? Not needed to start any
+   stage above; revisit only once a real cross-cutting tree operation
+   (e.g. a word-count stat) is actually being built.
+
+Remaining open items should be resolved before the Stage they block
+begins.
+
+**Verified:** 2026-11-11 @ (this patch)

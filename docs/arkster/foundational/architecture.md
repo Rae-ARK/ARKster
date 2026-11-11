@@ -20,7 +20,7 @@ prefs. This split, not a single store for everything, is deliberate: it
 keeps the indexed library state (which can be rebuilt from the folder by a
 rescan) separate from user preferences (which can't).
 
-## BookSource abstraction
+## BookSource abstraction — target shape, not yet real
 
 ```kotlin
 interface BookSource {
@@ -28,14 +28,22 @@ interface BookSource {
   suspend fun getMetadata(): BookMetadata
 }
 
-class FolderSource : BookSource { ... }  // shipped
+class FolderSource : BookSource { ... }  // not yet implemented — see below
 class EpubSource : BookSource { ... }    // see implementation/epub-support.md
 class PdfSource  : BookSource { ... }    // not yet started
 ```
 
-UI and ViewModels consume only the normalized `Chapter`/`BookMetadata`
-model; each source hides its own format's specifics (loose files vs. a ZIP
-container vs. a page-based document).
+This is the abstraction the scanner and reader are meant to be built on —
+UI and ViewModels consuming only the normalized `Chapter`/`BookMetadata`
+model, with each source hiding its own format's specifics (loose files vs.
+a ZIP container vs. a page-based document). It is **not what exists
+today**: there is no `BookSource`/`FolderSource` anywhere in `app/` —
+`ScannerImpl` reads and parses folders directly. The only code for this
+interface is an unwired proof-of-concept under
+`spec/android_poc/src/main/kotlin/arkster/data/BookSource.kt`. Making it
+real — a `FolderSource` implementation plus a `BookSourceFactory` — is
+Stage 5 of
+[`implementation/oop-modular-monolith-refactor.md`](../implementation/oop-modular-monolith-refactor.md).
 
 ## ChapterContentRepository
 
@@ -53,8 +61,8 @@ way no matter where it came from.
 ## Scanning
 
 - `ScannerImpl` enumerates the root folder's immediate children via
-  `DocumentFile.fromTreeUri()` and builds an appropriate `BookSource` per
-  entry.
+  `DocumentFile.fromTreeUri()` and parses each one directly — not yet
+  through a `BookSource` per entry; see the correction above.
 - Each novel's folder may contain chapters as loose files, arcs as
   subfolders, or (once `implementation/epub-support.md` ships) a single
   `.epub` file.
@@ -89,8 +97,9 @@ rendering instead of the flattened plain text they ship with today.
 ## Shipped feature set (v0.1 → v0.2)
 
 - SAF root folder selection, persisted `Uri` permission.
-- `FolderSource` scanning for `.txt`/`.md`, with ranked heuristics for
-  chapter numbering/titling and graceful fallbacks for messy folders
+- Folder-based scanning (`ScannerImpl`, direct — not yet behind
+  `FolderSource`) for `.txt`/`.md`, with ranked heuristics for chapter
+  numbering/titling and graceful fallbacks for messy folders
   (auto-generated covers, best-effort title normalization).
 - Arc detection by folder-name pattern (`Arc`, `Volume`, `Book`, `Part`,
   plus CJK variants), with per-arc cover art and position ordering.

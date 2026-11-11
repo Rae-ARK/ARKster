@@ -87,8 +87,10 @@ lifecycle — start at
 
 ## Architecture highlights
 - **Room + DataStore**: Indexed library state + lightweight prefs.
-- **BookSource abstraction**: FolderSource (shipped); EpubSource is in progress (see
-  [`docs/arkster/implementation/epub-support.md`](docs/arkster/implementation/epub-support.md));
+- **BookSource abstraction**: the scanner reads folders directly today, not through this
+  interface yet — making `FolderSource` real, alongside `EpubSource`, is staged in
+  [`docs/arkster/implementation/oop-modular-monolith-refactor.md`](docs/arkster/implementation/oop-modular-monolith-refactor.md)
+  and [`docs/arkster/implementation/epub-support.md`](docs/arkster/implementation/epub-support.md).
   PdfSource is a documented idea, not yet started (see
   [`docs/arkster/proposal/README.md`](docs/arkster/proposal/README.md)).
 - **ChapterContentRepository**: Unified interface for reading chapter text across sources.
