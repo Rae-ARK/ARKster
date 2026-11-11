@@ -46,21 +46,29 @@ package com.arkster.app.core.data
 
 import android.net.Uri
 import com.arkster.app.core.database.NovelEntity
+import com.arkster.app.core.datastore.PreferencesManager
 import com.arkster.app.domain.booksource.UnsupportedSource
 import com.arkster.app.domain.repository.AuthorRepository
 import com.arkster.app.domain.repository.NovelRepository
 import com.arkster.app.domain.repository.ReadingProgressRepository
 import com.arkster.app.scanner.ScannerImpl
+import com.arkster.app.scanner.decideStaleNovels
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.sync.Mutex
 
 class LibrarySession(
     private val novelRepository: NovelRepository,
     private val authorRepository: AuthorRepository,
     private val readingProgressRepository: ReadingProgressRepository,
-    private val scanner: ScannerImpl
+    private val scanner: ScannerImpl,
+    // See bugs.md Bug 11: needed so the two-pass stale-novel confirmation
+    // (decideStaleNovels below) can persist pendingMissing across process
+    // death, not just within this one in-memory LibrarySession instance.
+    private val prefsManager: PreferencesManager
 ) {
     private val _novels = MutableStateFlow<List<NovelEntity>>(emptyList())
     val novels: StateFlow<List<NovelEntity>> = _novels.asStateFlow()
@@ -77,6 +85,24 @@ class LibrarySession(
 
     private val _scanProgress = MutableStateFlow<Pair<Int, Int>?>(null) // (current, total) or null if not scanning
     val scanProgress: StateFlow<Pair<Int, Int>?> = _scanProgress.asStateFlow()
+
+    // See bugs.md Bug 15: HomeViewModel's auto-scan-on-launch and
+    // SettingsViewModel's manual rescan both call scan() independently, in
+    // their own coroutine scopes, against this same instance. Without a
+    // guard, two concurrent scan() calls each build their own local, unshared
+    // seenNovelIds set - whichever finishes first runs stale-cleanup
+    // (onScanCompleted below) against only its own partial view and can
+    // delete novels the still-running scan already confirmed exist. A second
+    // call that arrives while one is already running is a no-op rather than
+    // queued: queuing would still let two full scans run back-to-back against
+    // what may already be a stale/changed folder listing, and the already-
+    // running scan started more recently relative to any UI action that
+    // triggered this second call anyway. isScanning is exposed so a caller
+    // (e.g. Settings' Rescan button) can disable itself instead of relying on
+    // this guard being silent.
+    private val scanMutex = Mutex()
+    private val _isScanning = MutableStateFlow(false)
+    val isScanning: StateFlow<Boolean> = _isScanning.asStateFlow()
 
     private val _scanMessage = MutableStateFlow("")
     val scanMessage: StateFlow<String> = _scanMessage.asStateFlow()
@@ -98,6 +124,27 @@ class LibrarySession(
     // exception here should never be allowed to crash the app. Worst case the user
     // sees a stale/partial library and can retry from Settings.
     suspend fun scan(treeUri: Uri) {
+        // See bugs.md Bug 15: bail out immediately (no-op) rather than block, if a
+        // scan is already in flight - see this class's isScanning header comment
+        // for why this is a no-op and not a queued retry.
+        if (!scanMutex.tryLock()) return
+        try {
+            scanLocked(treeUri)
+        } finally {
+            scanMutex.unlock()
+        }
+    }
+
+    private suspend fun scanLocked(treeUri: Uri) {
+        _isScanning.value = true
+        try {
+            scanInternal(treeUri)
+        } finally {
+            _isScanning.value = false
+        }
+    }
+
+    private suspend fun scanInternal(treeUri: Uri) {
         // Tracks which novel IDs this scan pass actually found, so onScanCompleted
         // below can remove DB rows (and their cascaded arcs/chapters/overrides/
         // progress) for novels whose folder is genuinely gone - see bugs.md Bug 4. A
@@ -106,6 +153,12 @@ class LibrarySession(
         // scanChaptersForNovel's seenChapterIds/seenArcIds already make for a single
         // skipped item.
         val seenNovelIds = mutableSetOf<String>()
+        // See bugs.md Bug 11: novel ids that were already missing as of the
+        // previous completed scan pass (and are therefore one more miss away
+        // from actually being deleted) - read once up front so onScanCompleted
+        // below can hand it to decideStaleNovels without a suspending call of
+        // its own.
+        val pendingMissing = prefsManager.pendingMissingNovelIds.first()
         // See bugs.md Bug 6: set from onAuthorsDiscovered, which scanRoot always
         // fires before any per-novel onDiscovered below (same scan pass), then read
         // inside onDiscovered's merge. Defaults to true so a scan that never gets as
@@ -202,7 +255,7 @@ class LibrarySession(
                         }
                     }
                 },
-                onScanCompleted = {
+                onScanCompleted = { sawAnyNovelFolders ->
                     // See bugs.md Bug 4: this used to be a `novels.clear()` at the call
                     // site in Settings' onRescan, which cleared the UI list *before*
                     // scanning rather than reconciling it against a completed scan. That
@@ -215,10 +268,29 @@ class LibrarySession(
                     // onScanCompleted (never fired on an aborted/partial scan - see
                     // ScannerImpl.scanRoot), means the UI only ever loses a novel when
                     // this scan actually confirmed its folder is gone.
-                    val staleIds = novelRepository.all().map { it.id }.filter { it !in seenNovelIds }.toSet()
-                    staleIds.forEach { novelRepository.delete(it) }
-                    if (staleIds.isNotEmpty()) {
-                        _novels.update { current -> current.filterNot { it.id in staleIds } }
+                    //
+                    // See bugs.md Bug 11: the single-pass version that used to be here
+                    // (`novelRepository.all().filter { it !in seenNovelIds }` deleted
+                    // immediately) let one transient SAF read failure on one folder
+                    // permanently delete that novel's reading_progress and
+                    // chapter_overrides, which a rescan can never regenerate. Routing
+                    // through decideStaleNovels instead means a novel is only deleted
+                    // after being missing on two consecutive completed passes -
+                    // pendingMissing (read at the top of scan()) is this pass's
+                    // "already missing once" set, and pendingNext is persisted below so
+                    // the next scan (even after a process restart) picks up where this
+                    // one left off.
+                    val dbNovelIds = novelRepository.all().map { it.id }
+                    val decision = decideStaleNovels(
+                        sawAnyNovelFolders = sawAnyNovelFolders,
+                        dbNovelIds = dbNovelIds,
+                        seenNovelIds = seenNovelIds,
+                        pendingMissing = pendingMissing
+                    )
+                    prefsManager.setPendingMissingNovelIds(decision.pendingNext)
+                    if (decision.deleteNow.isNotEmpty()) {
+                        decision.deleteNow.forEach { novelRepository.delete(it) }
+                        _novels.update { current -> current.filterNot { it.id in decision.deleteNow } }
                     }
                 },
                 onUnsupportedSourceFound = { unsupported ->
