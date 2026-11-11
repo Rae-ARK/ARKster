@@ -119,6 +119,33 @@ rendering instead of the flattened plain text they ship with today.
   (auto-generated covers, best-effort title normalization).
 - Arc detection by folder-name pattern (`Arc`, `Volume`, `Book`, `Part`,
   plus CJK variants), with per-arc cover art and position ordering.
+
+### Arc semantics across sources
+
+`Arc` is one model (`ArcEntity`, position-ordered) but means something
+different depending on where a novel came from, and the distinction is in
+the data's origin, not in how it's stored or queried:
+
+- **Folder-scanned web novels:** an Arc is an optional, human-imposed
+  grouping — a subfolder someone named `Arc 2` for their own navigation
+  comfort. A WN with no such subfolders has no arcs at all; its chapters
+  are all root-level.
+- **EPUB/PDF:** an Arc *is* a Volume, 1:1 — the format's actual native
+  unit, not a convenience. Every chapter belongs to exactly one volume;
+  there is no root-level-chapter case the way a flat WN folder has.
+
+This needs no divergent code path, because `ChapterDao.forNovel`'s
+existing ordering already covers both: root-level chapters first (by
+`CASE WHEN chapters.arc_id IS NULL THEN 0 ELSE 1 END`), then each arc's
+chapters in `arcs.position` order, natural order within an arc. For a
+flat WN that's "ungrouped chapters, then each Arc-subfolder's chapters
+block"; for an EPUB/PDF with no root-level chapters, the same query
+reduces to "Vol 1's chapters, then Vol 2's, then Vol 3's, and so on" —
+i.e. the "All Chapters" flat view *is* volumes concatenated in position
+order, not a separate ordering scheme. Per-arc chapter lists (an arc's
+own page) are just that arc's slice of the same ordering. See
+`ChapterRepository.getEffectiveChapters()` for where this query is
+consumed.
 - Per-novel pagination preference (10/20/50/100), persisted in Room.
 - Manual chapter override editor (reorder, rename, mark arc boundaries),
   layered on top of scanned data and diff-persisted so it survives a

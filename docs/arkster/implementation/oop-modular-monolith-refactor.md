@@ -342,11 +342,30 @@ should be re-read against what actually landed here before Stage 1 of that
 plan begins. A `PdfSource` implementation can follow the same seam once
 someone commits to `proposal/README.md`'s PDF-support idea.
 
-### Stage 6 — Repository layer over `Dao` (Repository + Proxy). Not started.
-`NovelRepository`/`ChapterRepository`/`AuthorRepository` wrap the existing
-`Dao`s as the single source of truth `ViewModel`s depend on — nothing
-above `domain/` touches a `Dao` directly after this stage. Cover/avatar
-cache-on-first-access becomes an explicit Proxy.
+### Stage 6 — Repository layer over `Dao` (Repository + Proxy). Done.
+Six repositories now sit in `domain/repository/` — `NovelRepository`,
+`ChapterRepository` (absorbing `EffectiveChapters.kt`, now deleted, as
+`getEffectiveChapters()`), `AuthorRepository`, `ArcRepository`,
+`ReadingProgressRepository`, `ScanFingerprintRepository` — each a thin
+wrapper constructed from its `Dao`(s) in `App.kt`'s lazy properties, which
+remains the one place a `Dao` is actually touched. `AppViewModelFactory`
+and all four `ViewModel`s (`HomeViewModel`, `NovelDetailViewModel`,
+`ReaderViewModel`, `AuthorViewModel`) take repositories instead of `db`.
+Cover/avatar cache-on-first-access is now an explicit Proxy:
+`CachingCoverResolverProxy` and `CachingAuthorAvatarResolverProxy` wrap
+`CoverResolver`/`AuthorAvatarResolver` behind a `ConcurrentHashMap`,
+correct for `Dispatchers.IO` concurrency and for treating a cached "no
+cover found" as a valid value rather than a cache miss; `ScannerImpl` and
+`AuthorScanner` were wired to use them. `App.db` is now private, which
+forced two fixes outside the original Stage 6 survey:
+`AppNavHost.kt`'s `ChapterLoadErrorRoute` destination (the one call site
+reaching `app.db.chapterDao()`/`novelDao()` directly) now goes through
+the repositories, and `MainActivity.kt`'s `private val db get() = app.db`
+delegate and its bare `db` reference in the Stage 2 crash-guard block are
+gone — the crash-guard now forces construction through
+`app.novelRepository`, which still transitively triggers
+`AppDatabase.create()` at the same point, preserving the crash-screen
+guarantee.
 
 ### Stage 7 — QA / polish. Not started.
 Rotate every screen; kill the process via "Don't keep activities" while
