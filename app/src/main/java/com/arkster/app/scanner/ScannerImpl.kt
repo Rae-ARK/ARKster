@@ -36,6 +36,20 @@ package com.arkster.app.scanner
  * callback firings are all unchanged; every caller (App.kt, LibrarySession)
  * needed no changes. This is a pure internal reorganization of one class,
  * same as Stage 1.
+ *
+ * STAGE 5 MOVE -- 2026-11-11
+ * scanRoot's children loop used to only ever look at `if (child.isDirectory)`
+ * - anything else at the scan root (a stray .epub, a .pdf, a README) was
+ * silently skipped, with no distinction between "not a recognized format"
+ * and "a format ARKster knows about but can't read yet". Every child is now
+ * run through BookSourceFactory.classify() first: directories take the
+ * existing per-novel path unchanged; a recognized-but-unsupported file
+ * (.epub/.pdf) now fires the new onUnsupportedSourceFound callback instead
+ * of vanishing silently, so LibrarySession can surface it as a dialog
+ * (see docs/arkster/foundational/architecture.md); anything else keeps
+ * today's silent-skip behavior exactly as before. See
+ * domain/booksource/BookSourceFactory.kt and
+ * domain/booksource/FolderSource.kt for the rest of this stage.
  */
 
 import android.content.Context
@@ -46,6 +60,9 @@ import com.arkster.app.core.database.ArcEntity
 import com.arkster.app.core.database.AuthorEntity
 import com.arkster.app.core.database.ChapterEntity
 import com.arkster.app.core.database.NovelEntity
+import com.arkster.app.domain.booksource.BookSourceFactory
+import com.arkster.app.domain.booksource.SourceClassification
+import com.arkster.app.domain.booksource.UnsupportedSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.UUID
@@ -115,6 +132,12 @@ class ScannerImpl(private val context: Context) {
         // anywhere downstream of being found is indistinguishable, at onScanCompleted,
         // from one whose folder was really deleted.
         onNovelFolderSeen: suspend (novelId: String) -> Unit = {},
+        // Fired for every root-level file BookSourceFactory recognizes as a format
+        // ARKster has no BookSource implementation for yet (.epub, .pdf) - never
+        // for a directory, and never for a file the factory doesn't recognize at
+        // all (those stay silently skipped, same as before this stage). See
+        // SourceClassification.Unsupported and LibrarySession.unsupportedSources.
+        onUnsupportedSourceFound: suspend (UnsupportedSource) -> Unit = {},
         onProgress: suspend (current: Int, total: Int, message: String) -> Unit = { _, _, _ -> }
     ) = withContext(Dispatchers.IO) {
         // Everything below touches the Storage Access Framework, which throws
@@ -160,7 +183,21 @@ class ScannerImpl(private val context: Context) {
             var sawAnyNovelFolders = false
             children.forEachIndexed { index, child ->
                 onProgress(index + 1, total, "Scanning ${child.name}...")
-                if (child.isDirectory) {
+                when (val classification = BookSourceFactory.classify(child.name, child.isDirectory)) {
+                    is SourceClassification.Unsupported -> {
+                        onUnsupportedSourceFound(
+                            UnsupportedSource(
+                                displayName = child.name ?: "Unknown",
+                                uri = child.uri.toString(),
+                                code = classification.code
+                            )
+                        )
+                        return@forEachIndexed
+                    }
+                    SourceClassification.Ignored -> return@forEachIndexed
+                    SourceClassification.Folder -> Unit
+                }
+                run {
                     sawAnyNovelFolders = true
                     // Pure URI hashing, no I/O - so this can't itself be the thing that
                     // fails. Marked seen before the try block so a throw anywhere inside

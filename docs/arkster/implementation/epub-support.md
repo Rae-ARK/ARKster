@@ -244,6 +244,20 @@ This file. No app code touched.
 
 ## Open questions
 
+0. **Resolved by `oop-modular-monolith-refactor.md`'s Stage 5 landing
+   first:** this plan's own composite `epub://<uri>#<spine-index>` scheme
+   was written assuming EPUB support would need to invent its own
+   file-type dispatcher. `BookSourceFactory`/`BookSource` now exist for
+   real (`domain/booksource/`) and already recognize a `.epub` scan-root
+   file as a distinct, unsupported case. Stage 1 below should implement
+   `EpubSource : BookSource` against that seam — `BookSourceFactory`
+   picking it the same way it already picks `Unsupported(EPUB)` today, not
+   a parallel URI-scheme check inside `ChapterContentRepository`. The
+   `sourcePath`-as-composite-URI design further down is still a reasonable
+   shape for `ChapterEntity.sourcePath` specifically, but re-read it
+   against `FolderSource.kt`'s actual shape before Stage 1 starts, per the
+   refactor doc's own instruction to re-read whichever stage lands second.
+
 1. Where does a `.epub` file live relative to the existing "one folder =
    one novel" convention — a loose file directly in the scan root (its
    own filename becomes the novel identity), or does it still need to sit
@@ -277,4 +291,4 @@ This file. No app code touched.
 Remaining open items should be resolved before the Stage they block
 begins.
 
-**Verified:** 2026-11-10 @ (this patch)
+**Verified:** 2026-11-11 @ (this patch)

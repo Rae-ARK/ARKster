@@ -32,6 +32,7 @@ import com.arkster.app.core.data.LibrarySession
 import com.arkster.app.core.database.AppDatabase
 import com.arkster.app.core.database.NovelEntity
 import com.arkster.app.core.datastore.PreferencesManager
+import com.arkster.app.domain.booksource.UnsupportedSource
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
@@ -60,6 +61,15 @@ class HomeViewModel(
 
     val scanProgress: StateFlow<Pair<Int, Int>?> = librarySession.scanProgress
     val scanMessage: StateFlow<String> = librarySession.scanMessage
+
+    // STAGE 5 (this patch): thin pass-through onto LibrarySession's StateFlow,
+    // same pattern every other property on this class already follows - see
+    // LibrarySession.unsupportedSources for what populates it.
+    val unsupportedSources: StateFlow<List<UnsupportedSource>> = librarySession.unsupportedSources
+
+    fun dismissUnsupportedSources() {
+        librarySession.dismissUnsupportedSources()
+    }
 
     init {
         // Restore saved library URI and auto-scan - same guard as before

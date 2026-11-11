@@ -29,7 +29,12 @@ act on.
 - **PDF support** (`PdfSource`) — page-based reader with bookmarks; no
   robust text reflow or chapter extraction planned. Named alongside EPUB in
   `architecture.md`'s "Not yet built" section as the second format
-  `BookSource` was designed to grow into.
+  `BookSource` was designed to grow into. `BookSourceFactory` (see
+  `implementation/oop-modular-monolith-refactor.md`'s Stage 5) already
+  recognizes a `.epub`/`.pdf` scan-root file as "unsupported" and surfaces
+  it to the user instead of leaving it silently invisible — whoever picks
+  this up implements `PdfSource` against that existing seam rather than
+  inventing a new detection path.
 - **Opt-in network metadata provider** — cover art/author/synopsis lookup,
   cached in Room with a `fetchedAt` timestamp, off unless
   `network_metadata_enabled` is set. The preference and the

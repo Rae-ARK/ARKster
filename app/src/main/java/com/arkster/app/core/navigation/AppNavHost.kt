@@ -86,6 +86,7 @@ fun AppNavHost(
             val uiState by viewModel.uiState.collectAsStateWithLifecycle()
             val scanProgress by viewModel.scanProgress.collectAsStateWithLifecycle()
             val scanMessage by viewModel.scanMessage.collectAsStateWithLifecycle()
+            val unsupportedSources by viewModel.unsupportedSources.collectAsStateWithLifecycle()
             // scanProgress/scanMessage aren't rendered by HomeScreen today (they
             // weren't passed to it pre-Stage-3 either - MainActivity collected them
             // into fields nothing downstream of Screen.Home actually read). Collected
@@ -116,7 +117,9 @@ fun AppNavHost(
                         navController.navigate(FictionBrowseRoute.route)
                     }
                 },
-                onSelectFolderClick = onPickFolder
+                onSelectFolderClick = onPickFolder,
+                unsupportedSources = unsupportedSources,
+                onDismissUnsupportedSources = { viewModel.dismissUnsupportedSources() }
             )
         }
 

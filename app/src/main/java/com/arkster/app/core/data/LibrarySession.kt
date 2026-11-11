@@ -38,6 +38,7 @@ package com.arkster.app.core.data
 import android.net.Uri
 import com.arkster.app.core.database.AppDatabase
 import com.arkster.app.core.database.NovelEntity
+import com.arkster.app.domain.booksource.UnsupportedSource
 import com.arkster.app.scanner.ScannerImpl
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -67,6 +68,16 @@ class LibrarySession(
     private val _scanMessage = MutableStateFlow("")
     val scanMessage: StateFlow<String> = _scanMessage.asStateFlow()
 
+    // STAGE 5 (this patch): files at the scan root whose format
+    // BookSourceFactory recognized (.epub, .pdf) but ARKster has no
+    // BookSource implementation for yet. Replaced wholesale on every scan
+    // pass (not accumulated) so a file that's since been removed, or a
+    // format that's since shipped real support, doesn't linger here forever.
+    // HomeViewModel surfaces this as a dialog; see dismissUnsupportedSources
+    // below for how it's cleared without waiting for the next scan.
+    private val _unsupportedSources = MutableStateFlow<List<UnsupportedSource>>(emptyList())
+    val unsupportedSources: StateFlow<List<UnsupportedSource>> = _unsupportedSources.asStateFlow()
+
     // Scans unattended on every app launch (via HomeViewModel.init) once a library
     // folder has been picked once, and again on demand from Settings' Rescan.
     // ScannerImpl already fails soft on SAF errors (revoked permissions, deleted
@@ -89,6 +100,7 @@ class LibrarySession(
         // longer accessible" returns in scanRoot) doesn't itself look like a missing
         // authors/.
         var authorsFolderFound = true
+        val unsupportedThisPass = mutableListOf<UnsupportedSource>()
         try {
             scanner.scanRoot(
                 treeUri,
@@ -196,11 +208,15 @@ class LibrarySession(
                         _novels.update { current -> current.filterNot { it.id in staleIds } }
                     }
                 },
+                onUnsupportedSourceFound = { unsupported ->
+                    unsupportedThisPass.add(unsupported)
+                },
                 onProgress = { current, total, message ->
                     _scanProgress.value = Pair(current, total)
                     _scanMessage.value = message
                 }
             )
+            _unsupportedSources.value = unsupportedThisPass
             refreshRecentlyRead()
             _scanProgress.value = null
             _scanMessage.value = ""
@@ -222,5 +238,13 @@ class LibrarySession(
 
         val inProgress = db.novelDao().byStatus("IN_PROGRESS")
         _inProgressNovels.value = inProgress
+    }
+
+    // Lets the dialog be dismissed without waiting for the next scan pass to
+    // naturally clear it - the next scan() call still rebuilds this list from
+    // scratch regardless (see scan() above), so dismissing early doesn't lose
+    // any file the next scan would otherwise have reported again.
+    fun dismissUnsupportedSources() {
+        _unsupportedSources.value = emptyList()
     }
 }

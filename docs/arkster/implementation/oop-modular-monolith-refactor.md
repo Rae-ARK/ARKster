@@ -39,7 +39,39 @@ entity state from the DB via `SavedStateHandle` args rather than holding an
 unparcelable entity directly, the way `Screen.Reader`'s old `content: String`
 field could not survive one. See each new file's own `STAGE 3 MOVE` header
 for exactly what moved from `MainActivity.kt` and why.
-Stages 4–7 below are not started.
+**Stage 4 — `ScannerImpl` decomposition (Facade + Chain of Responsibility +
+Builder). Done.** `ScannerImpl.kt` is down to the thin 358-line facade the
+target layout described, with `ChapterTitleParser.kt`, `CoverResolver.kt`,
+`FingerprintCalculator.kt`, `AuthorScanner.kt`, and `NovelEntityBuilder.kt`
+split out as the four focused collaborators — see each file's own
+`STAGE 4 MOVE` header for exactly what moved from `ScannerImpl.kt` to it
+and why. This status block previously went two patches without recording
+that this stage had landed at all (the table in
+[`README.md`](README.md) still said "2 of 7" after it); noted here as the
+no-drift rule's own failure mode, not just as a correction, so a future
+stage doesn't quietly do the same.
+**Stage 5 — real `BookSource`/`ChapterContentRepository` (Abstract Factory
++ Bridge + Adapter). Done, partially (this patch).** `domain/booksource/`
+now holds a real, compiled `BookSource` interface and `BookSourceFactory`
+(promoted from the `spec/android_poc` stub, which `architecture.md`
+previously had to flag as unwired) plus a real `FolderSource`
+implementation built on Stage 4's collaborators. What's actually wired
+into the live scan pipeline this patch: `ScannerImpl.scanRoot` now runs
+every scan-root entry through `BookSourceFactory.classify()` — directories
+still take the existing per-novel path unchanged, but a `.epub`/`.pdf` file
+now fires a new `onUnsupportedSourceFound` callback (`LibrarySession` →
+`HomeViewModel` → a dialog in `HomeScreen`) instead of vanishing silently,
+the way every unrecognized scan-root file still did before this patch.
+What's deliberately **not** done: `ScannerImpl.scanChaptersForNovel` does
+not yet call through `FolderSource` for its main chapter-parsing pass — it
+still owns arc detection and the chapter_overrides-preserving diff logic
+directly, which `BookSource.listChapters()`'s flat model has nowhere to
+put yet. Retiring `parseChaptersInFolder` in `FolderSource`'s favor, and
+giving the normalized `Chapter` model arc awareness so that's possible, is
+follow-on work — see `FolderSource.kt`'s own header. EPUB/PDF still have no
+`BookSource` implementation of their own; this stage only gave the
+*factory* a name for what they are, not a way to read them.
+Stages 6–7 below are not started.
 
 **Note on this patch's history:** the ViewModels, routes, and `AppNavHost`
 that make up this stage were first committed (as "stage 2.5") with the
@@ -279,22 +311,36 @@ thin NavHost-host the target layout described. This closes the
 config-change/process-death gap described above in full — Stage 2 already
 had the config-change half.
 
-### Stage 4 — `ScannerImpl` decomposition (Facade + Chain of Responsibility + Builder). Not started.
+### Stage 4 — `ScannerImpl` decomposition (Facade + Chain of Responsibility + Builder). Done.
 Split into the thin facade plus `ChapterTitleParser`, `CoverResolver`,
-`AuthorScanner`, `FingerprintCalculator`, and a merge `Builder`, as
-described above. Same inputs and outputs as today; different internal
-seams.
+`AuthorScanner`, `FingerprintCalculator`, and `NovelEntityBuilder` (the
+merge `Builder`), as described above. Same inputs and outputs as before;
+different internal seams — see each collaborator's own `STAGE 4 MOVE`
+header.
 
-### Stage 5 — Real `BookSource`/`ChapterContentRepository` (Abstract Factory + Bridge + Adapter). Not started.
-Promote `spec/android_poc`'s stub into `domain/booksource/`, implement
-`FolderSource` for real against the scanning logic from Stage 4, and add
-the `BookSourceFactory`. Corrects `architecture.md`'s "shipped" claim for
-real. `epub-support.md`'s own Stage 1 should land against this seam
-instead of inventing its own URI-scheme dispatcher, if this stage ships
-first; if EPUB support starts first instead, its dispatcher gets absorbed
-into the factory here rather than the other way around. Whichever lands
-first, the other plan's corresponding stage should be re-read before it
-starts.
+### Stage 5 — Real `BookSource`/`ChapterContentRepository` (Abstract Factory + Bridge + Adapter). Done, partially (this patch).
+`spec/android_poc`'s stub is promoted into `domain/booksource/`
+(`BookSource.kt`), `FolderSource` is implemented for real against Stage
+4's collaborators, and `BookSourceFactory` exists and is wired into
+`ScannerImpl.scanRoot`'s children loop. This corrects `architecture.md`'s
+"shipped" claim for the interface and factory specifically — see
+`architecture.md`'s own `BookSource` section for exactly what that means
+and doesn't mean. Not done this patch: `ScannerImpl.scanChaptersForNovel`
+does not yet route its main chapter-parsing pass through `FolderSource` —
+see `FolderSource.kt`'s header for why (arc awareness isn't in the
+normalized `Chapter` model yet) and treat that as the remainder of this
+stage rather than a new one. One new, explicitly-scoped user-facing piece
+landed alongside the refactor itself (not purely internal, unlike every
+other stage here): `BookSourceFactory` now recognizes `.epub`/`.pdf` scan-
+root files specifically as *unsupported*, surfaced to the user via a
+dialog, rather than leaving them silently invisible the way an
+unrecognized file still is. `epub-support.md`'s own Stage 1 should land
+against the `BookSourceFactory`/`BookSource` seam here — an `EpubSource`
+implementation, not a new URI-scheme dispatcher of its own — now that this
+stage has shipped first; the `epub://` composite-URI design in that plan
+should be re-read against what actually landed here before Stage 1 of that
+plan begins. A `PdfSource` implementation can follow the same seam once
+someone commits to `proposal/README.md`'s PDF-support idea.
 
 ### Stage 6 — Repository layer over `Dao` (Repository + Proxy). Not started.
 `NovelRepository`/`ChapterRepository`/`AuthorRepository` wrap the existing

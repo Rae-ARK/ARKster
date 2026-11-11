@@ -20,30 +20,46 @@ prefs. This split, not a single store for everything, is deliberate: it
 keeps the indexed library state (which can be rebuilt from the folder by a
 rescan) separate from user preferences (which can't).
 
-## BookSource abstraction — target shape, not yet real
+## BookSource abstraction — real, partially wired
 
 ```kotlin
 interface BookSource {
   suspend fun listChapters(): List<Chapter>
   suspend fun getMetadata(): BookMetadata
+  suspend fun fingerprint(): SourceFingerprint
 }
 
-class FolderSource : BookSource { ... }  // not yet implemented — see below
-class EpubSource : BookSource { ... }    // see implementation/epub-support.md
-class PdfSource  : BookSource { ... }    // not yet started
+class FolderSource(folder, novelId, ...) : BookSource { ... }  // real — domain/booksource/FolderSource.kt
+class EpubSource : BookSource { ... }    // not started — see implementation/epub-support.md
+class PdfSource  : BookSource { ... }    // not started — see proposal/README.md
 ```
 
 This is the abstraction the scanner and reader are meant to be built on —
 UI and ViewModels consuming only the normalized `Chapter`/`BookMetadata`
 model, with each source hiding its own format's specifics (loose files vs.
-a ZIP container vs. a page-based document). It is **not what exists
-today**: there is no `BookSource`/`FolderSource` anywhere in `app/` —
-`ScannerImpl` reads and parses folders directly. The only code for this
-interface is an unwired proof-of-concept under
-`spec/android_poc/src/main/kotlin/arkster/data/BookSource.kt`. Making it
-real — a `FolderSource` implementation plus a `BookSourceFactory` — is
-Stage 5 of
+a ZIP container vs. a page-based document). `BookSource`, `BookSourceFactory`,
+and a real `FolderSource` now exist under `domain/booksource/` (promoted
+from the formerly-unwired proof-of-concept at
+`spec/android_poc/src/main/kotlin/arkster/data/BookSource.kt`), per Stage 5
+of
 [`implementation/oop-modular-monolith-refactor.md`](../implementation/oop-modular-monolith-refactor.md).
+
+Two things this does **not** yet mean, stated plainly since this section
+previously had to walk back an earlier overclaim of "shipped":
+
+- `ScannerImpl.scanChaptersForNovel` does not call through `FolderSource`
+  for its main chapter-parsing pass — it still walks a novel's root and arc
+  subfolders directly, because arc detection and the chapter_overrides-
+  preserving diff logic have nowhere to go in `FolderSource`'s current flat
+  `Chapter` model. `FolderSource` today correctly handles a flat, arc-less
+  folder; a novel with arcs still goes through `ScannerImpl`'s own code
+  path, unchanged.
+- `EpubSource`/`PdfSource` still don't exist. What **is** wired in is
+  `BookSourceFactory` recognizing a `.epub`/`.pdf` file at the scan root as
+  a format without an implementation yet, and `ScannerImpl.scanRoot`
+  surfacing that to the user as a dialog (`LibrarySession.unsupportedSources`
+  → `HomeScreen`'s `UnsupportedSourcesDialog`) instead of the file silently
+  vanishing, which is what every unrecognized scan-root file still does.
 
 ## ChapterContentRepository
 

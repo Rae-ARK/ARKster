@@ -8,6 +8,8 @@ package com.arkster.app.feature.home
  *
  */
 
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -19,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -57,6 +60,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.arkster.app.core.database.NovelEntity
+import com.arkster.app.domain.booksource.UnsupportedSource
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -74,9 +78,22 @@ fun HomeScreen(
     // reachable via "back" from NovelDetail/Reader - which themselves require novels to
     // already exist. New installs had no way in. This callback gives Home a direct entry
     // point to the picker so that dead end can't happen again.
-    onSelectFolderClick: () -> Unit = {}
+    onSelectFolderClick: () -> Unit = {},
+    // STAGE 5 (this patch): files BookSourceFactory recognized as a format
+    // ARKster can't read yet (.epub, .pdf) - see LibrarySession.unsupportedSources
+    // for what populates this and why it's replaced wholesale per scan rather
+    // than accumulated.
+    unsupportedSources: List<UnsupportedSource> = emptyList(),
+    onDismissUnsupportedSources: () -> Unit = {}
 ) {
     val searchQuery = remember { mutableStateOf("") }
+
+    if (unsupportedSources.isNotEmpty()) {
+        UnsupportedSourcesDialog(
+            sources = unsupportedSources,
+            onDismiss = onDismissUnsupportedSources
+        )
+    }
     // Snapshot `novels` (a SnapshotStateList) into a plain List before using it as a
     // remember() key. SnapshotStateList doesn't override equals()/hashCode() - it's
     // compared by reference, and that reference never changes as items are added to it
@@ -281,6 +298,42 @@ fun HomeScreen(
         }
         }
     }
+}
+
+// STAGE 5 (this patch): tells the user *why* an .epub/.pdf sitting in their
+// library folder never showed up, instead of leaving it silently invisible
+// (what every unrecognized/unsupported scan-root file still did before this
+// stage). One dialog for the whole pass rather than one per file - a library
+// with several EPUBs dropped in at once shouldn't need several dismisses.
+@Composable
+private fun UnsupportedSourcesDialog(
+    sources: List<UnsupportedSource>,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Unsupported file" + if (sources.size > 1) "s" else "") },
+        text = {
+            Column {
+                Text(
+                    if (sources.size == 1) {
+                        "This file's format isn't supported yet and was skipped:"
+                    } else {
+                        "These files' formats aren't supported yet and were skipped:"
+                    }
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                sources.forEach { source ->
+                    Text("• ${source.displayName} (${source.formatLabel})")
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("OK")
+            }
+        }
+    )
 }
 
 @Composable
