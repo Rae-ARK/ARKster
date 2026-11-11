@@ -3,7 +3,10 @@
 ## Status
 
 **Stage 0 — documentation. Done.** Stages 1–4 below are not started. No
-app code has been touched yet.
+app code has been touched yet — this doc was re-checked against the
+codebase after `oop-modular-monolith-refactor.md`'s Stage 6 landed
+(see open question 0), and nothing in the plan's own stages changed as a
+result, only the seams Stage 1 will build against.
 
 ## Motivation
 
@@ -133,6 +136,21 @@ same "resolve once, store a stable URI" pattern `findCoverUri` already
 establishes, just with a cache step in front of it since the source bytes
 aren't independently addressable.
 
+Now that `oop-modular-monolith-refactor.md`'s Stage 6 has landed,
+`CachingCoverResolverProxy` is a real, concrete precedent for exactly
+this "resolve once, keep a null result as a valid cached answer rather
+than a miss" shape (`ConcurrentHashMap<String, CachedResult>`, its
+`CachedResult` wrapper existing solely so a resolved-to-nothing folder
+isn't retried every call). It is **not**, however, something this
+extraction step can literally plug into: `CoverSource.findCoverUri`
+takes a `DocumentFile` folder and returns an existing SAF URI, whereas
+EPUB cover extraction reads bytes out of a zip entry and writes a new
+file into app-private storage — a different operation, not a different
+input to the same one. `EpubChapterContentRepository`'s extraction cache
+should follow the same pattern (a small `ConcurrentHashMap` keyed by
+EPUB URI, wrapping the resolved `file://` URI or lack of one) rather than
+be threaded through `CoverSource`/`CachingCoverResolverProxy` itself.
+
 ### Rendering: plain-text-strip for v1, HTML fidelity out of scope
 
 Two options were weighed for chapter body rendering: stripping XHTML to
@@ -184,7 +202,13 @@ This file. No app code touched.
   `NovelEntity` seeded from OPF metadata (falling back to
   `metadata.json`/filename-derived title exactly where OPF itself is
   missing a field — never blocks a scan, same guarantee every other
-  optional-metadata path in `ScannerImpl` already gives).
+  optional-metadata path in `ScannerImpl` already gives). With Stage 6 of
+  the refactor now landed, these rows are persisted through
+  `NovelRepository`/`ChapterRepository`/`ArcRepository` — the same
+  constructor-injected repositories `ScannerImpl` already holds for the
+  folder-scan path — not through `NovelDao`/`ChapterDao`/`ArcDao`
+  directly; "nothing above `domain/` touches a `Dao` directly" applies to
+  this new path exactly as it does to the existing one.
 - Cover extraction to app-private cache, as described above.
 - No UI changes this stage — purely data layer, verifiable by inspecting
   the resulting Room rows for a handful of sample EPUB files.
@@ -244,9 +268,9 @@ This file. No app code touched.
 
 ## Open questions
 
-0. **Resolved by `oop-modular-monolith-refactor.md`'s Stage 5 landing
-   first:** this plan's own composite `epub://<uri>#<spine-index>` scheme
-   was written assuming EPUB support would need to invent its own
+0. **Resolved by `oop-modular-monolith-refactor.md`'s Stage 5, then Stage
+   6, landing first:** this plan's own composite `epub://<uri>#<spine-index>`
+   scheme was written assuming EPUB support would need to invent its own
    file-type dispatcher. `BookSourceFactory`/`BookSource` now exist for
    real (`domain/booksource/`) and already recognize a `.epub` scan-root
    file as a distinct, unsupported case. Stage 1 below should implement
@@ -257,6 +281,13 @@ This file. No app code touched.
    shape for `ChapterEntity.sourcePath` specifically, but re-read it
    against `FolderSource.kt`'s actual shape before Stage 1 starts, per the
    refactor doc's own instruction to re-read whichever stage lands second.
+   Stage 6 landing afterward adds a second seam to design against before
+   Stage 1 starts: `NovelRepository`/`ChapterRepository`/`ArcRepository`
+   are now the only sanctioned way to write those rows (see the Stage 1
+   bullet above), and `CachingCoverResolverProxy` is now a concrete,
+   copyable precedent for the cover-extraction cache described under
+   "Cover art" — though not a literal interface it plugs into, since its
+   `CoverSource` contract is folder-shaped, not zip-entry-shaped.
 
 1. Where does a `.epub` file live relative to the existing "one folder =
    one novel" convention — a loose file directly in the scan root (its
@@ -291,4 +322,5 @@ This file. No app code touched.
 Remaining open items should be resolved before the Stage they block
 begins.
 
-**Verified:** 2026-11-11 @ (this patch)
+**Verified:** 2026-11-11 @ d46debb (Stage 6 landed, plan re-checked
+against current code; no stage content changed)
