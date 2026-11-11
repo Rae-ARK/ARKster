@@ -21,11 +21,17 @@ unchanged. This closes the config-change half of the gap described above;
 the process-death half is still open until Stage 3's `SavedStateHandle`
 work. Stages 3–7 below are not started.
 
-This doc itself is scaffolding for the refactor, not a permanent fixture —
-expect it to be deleted once Stage 7 ships, at which point every
-`STAGE N MOVE` comment this refactor has added that links here will need
-a new home for that context (or to just inline the relevant bit) before
-the link goes stale. Noting this now so it isn't a surprise later.
+This doc itself is scaffolding for the refactor, not a permanent fixture:
+once the refactor it describes is fully landed, this file is meant to go
+away rather than linger as a historical record — `git log` is where that
+history belongs (see the no-drift rule in `docs/README.md`). Every
+in-code comment that points back here for context (`STAGE N MOVE` headers
+and similar) is borrowing against that fact, so whoever retires this doc
+owns giving that context a new home first — inlined at the call site, or
+folded into a foundational doc — rather than leaving a link that quietly
+goes stale. Noting the principle here, rather than a specific stage
+number, so this note doesn't itself go stale if the staging plan below is
+ever reshuffled, split, or renumbered.
 
 ## Motivation
 
