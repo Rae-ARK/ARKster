@@ -25,6 +25,13 @@ package com.arkster.app.core.navigation
  * #1 already made for Stage 2's App-scoped singletons, extended here to
  * ViewModels for the same reason: single-module, small enough that Hilt/
  * Koin isn't obviously worth the new build dependency yet.
+ *
+ * STAGE 6 MOVE -- 2026-11-11
+ * Every `app.db` argument below is replaced with whichever of `app`'s six
+ * repositories that ViewModel actually touches - see each ViewModel's own
+ * STAGE 6 MOVE header for its exact set. `app.db` itself is private now
+ * (see App.kt), so this is also the point past which the old call shape
+ * would no longer compile, not just a style preference.
  */
 
 import android.os.Bundle
@@ -54,15 +61,31 @@ class AppViewModelFactory(
     ): T {
         val viewModel = when (modelClass) {
             HomeViewModel::class.java ->
-                HomeViewModel(app.db, app.prefsManager, app.librarySession)
+                HomeViewModel(app.chapterRepository, app.readingProgressRepository, app.prefsManager, app.librarySession)
             FictionBrowseViewModel::class.java ->
                 FictionBrowseViewModel(app.librarySession)
             NovelDetailViewModel::class.java ->
-                NovelDetailViewModel(handle, app.db, app.metadataProvider, app.librarySession)
+                NovelDetailViewModel(
+                    handle,
+                    app.novelRepository,
+                    app.chapterRepository,
+                    app.arcRepository,
+                    app.metadataProvider,
+                    app.librarySession
+                )
             ReaderViewModel::class.java ->
-                ReaderViewModel(handle, app.db, app.contentRepo, app.librarySession)
+                ReaderViewModel(
+                    handle,
+                    app.novelRepository,
+                    app.chapterRepository,
+                    app.arcRepository,
+                    app.authorRepository,
+                    app.readingProgressRepository,
+                    app.contentRepo,
+                    app.librarySession
+                )
             AuthorViewModel::class.java ->
-                AuthorViewModel(handle, app.db)
+                AuthorViewModel(handle, app.authorRepository, app.novelRepository)
             SettingsViewModel::class.java ->
                 SettingsViewModel(app.prefsManager, app.librarySession)
             else ->

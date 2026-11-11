@@ -18,15 +18,20 @@ package com.arkster.app.feature.author
  * NavBackStackEntry/ViewModel instance, rather than mutating an existing
  * one in place) - see Routes.kt's note on Screen.Author's old `from` field
  * for the other simplification a real back stack gives this screen for free.
+ *
+ * STAGE 6 MOVE -- 2026-11-11
+ * Took `db: AppDatabase` before this patch and called authorDao()/
+ * novelDao() directly - now takes AuthorRepository/NovelRepository instead.
  */
 
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.arkster.app.core.database.AppDatabase
 import com.arkster.app.core.database.AuthorEntity
 import com.arkster.app.core.database.NovelEntity
 import com.arkster.app.core.navigation.AuthorRoute
+import com.arkster.app.domain.repository.AuthorRepository
+import com.arkster.app.domain.repository.NovelRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -40,7 +45,8 @@ data class AuthorUiState(
 
 class AuthorViewModel(
     savedStateHandle: SavedStateHandle,
-    private val db: AppDatabase
+    private val authorRepository: AuthorRepository,
+    private val novelRepository: NovelRepository
 ) : ViewModel() {
 
     private val authorId: String = checkNotNull(savedStateHandle[AuthorRoute.authorIdArg])
@@ -51,8 +57,8 @@ class AuthorViewModel(
     init {
         viewModelScope.launch {
             _uiState.value = AuthorUiState(
-                author = db.authorDao().findById(authorId),
-                novels = db.novelDao().byAuthor(authorId),
+                author = authorRepository.findById(authorId),
+                novels = novelRepository.byAuthor(authorId),
                 isLoading = false
             )
         }

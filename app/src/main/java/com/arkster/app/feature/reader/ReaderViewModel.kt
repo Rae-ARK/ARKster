@@ -31,21 +31,33 @@ package com.arkster.app.feature.reader
  * different destination up front - this ViewModel already IS the Reader
  * destination - so it reports the failure via ReaderNavEvent instead and
  * lets AppNavHost navigate to ChapterLoadErrorRoute.
+ *
+ * STAGE 6 MOVE -- 2026-11-11
+ * Took `db: AppDatabase` before this patch and called chapterDao()/
+ * novelDao()/arcDao()/authorDao()/readingProgressDao() directly - now takes
+ * ChapterRepository/NovelRepository/ArcRepository/AuthorRepository/
+ * ReadingProgressRepository instead, one per Dao this class touched.
+ * `loadEffectiveChapters(db, novelId)` becomes
+ * `chapterRepository.getEffectiveChapters(novelId)` - see
+ * ChapterRepository's own STAGE 6 MOVE header.
  */
 
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.arkster.app.core.data.LibrarySession
-import com.arkster.app.core.database.AppDatabase
 import com.arkster.app.core.database.AuthorEntity
 import com.arkster.app.core.database.ChapterEntity
 import com.arkster.app.core.database.NovelEntity
 import com.arkster.app.core.database.ReadingProgressEntity
 import com.arkster.app.core.navigation.ReaderRoute
+import com.arkster.app.domain.repository.ArcRepository
+import com.arkster.app.domain.repository.AuthorRepository
 import com.arkster.app.domain.repository.ChapterLoadResult
+import com.arkster.app.domain.repository.ChapterRepository
+import com.arkster.app.domain.repository.NovelRepository
+import com.arkster.app.domain.repository.ReadingProgressRepository
 import com.arkster.app.domain.repository.TextChapterContentRepository
-import com.arkster.app.domain.repository.loadEffectiveChapters
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -74,7 +86,11 @@ sealed class ReaderNavEvent {
 
 class ReaderViewModel(
     savedStateHandle: SavedStateHandle,
-    private val db: AppDatabase,
+    private val novelRepository: NovelRepository,
+    private val chapterRepository: ChapterRepository,
+    private val arcRepository: ArcRepository,
+    private val authorRepository: AuthorRepository,
+    private val readingProgressRepository: ReadingProgressRepository,
     private val contentRepo: TextChapterContentRepository,
     private val librarySession: LibrarySession
 ) : ViewModel() {
@@ -96,10 +112,10 @@ class ReaderViewModel(
     // chapter text directly, so a read failure here reports ReaderNavEvent.
     // ChapterLoadFailed instead of silently showing an empty chapter.
     private suspend fun loadChapter(chapterId: String) {
-        val chapter = db.chapterDao().findById(chapterId) ?: return
-        val novel = db.novelDao().findById(novelId)
-        val arcs = db.arcDao().forNovel(novelId)
-        val effective = loadEffectiveChapters(db, novelId)
+        val chapter = chapterRepository.findById(chapterId) ?: return
+        val novel = novelRepository.findById(novelId)
+        val arcs = arcRepository.forNovel(novelId)
+        val effective = chapterRepository.getEffectiveChapters(novelId)
         val currentIndex = effective.chapters.indexOfFirst { it.id == chapter.id }
         val previousChapter = effective.chapters.getOrNull(currentIndex - 1).takeIf { currentIndex > 0 }
         val nextChapter = effective.chapters.getOrNull(currentIndex + 1).takeIf { currentIndex >= 0 }
@@ -109,7 +125,7 @@ class ReaderViewModel(
         val coverUri = chapter.arcId
             ?.let { arcId -> arcs.firstOrNull { it.id == arcId }?.coverUri }
             ?: novel?.coverUri
-        val author = novel?.authorId?.let { db.authorDao().findById(it) }
+        val author = novel?.authorId?.let { authorRepository.findById(it) }
 
         when (val result = contentRepo.getTextContent(chapter.sourcePath)) {
             is ChapterLoadResult.Ok -> {
@@ -132,7 +148,7 @@ class ReaderViewModel(
 
     suspend fun saveProgress(progress: Float) {
         val chapter = _uiState.value.chapter ?: return
-        db.readingProgressDao().upsert(
+        readingProgressRepository.upsert(
             ReadingProgressEntity(
                 novelId = novelId,
                 chapterId = chapter.id,

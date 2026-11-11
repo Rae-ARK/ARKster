@@ -26,10 +26,15 @@ package com.arkster.app
  * safety net (unchanged from Stage 2 and earlier - nothing about *that*
  * logic needed to change for this stage), the splash gate (not a navigable
  * destination, so it was never a Screen/Route case to begin with), and a
- * call into AppNavHost. db/scanner/prefsManager/contentRepo below are still
+ * call into AppNavHost. scanner/prefsManager/contentRepo below are still
  * referenced here only for the Stage 2 crash-guard's first-access trick and
  * the theme/reader-prefs Flows the root composable reads directly - nothing
  * here owns their data anymore the way the old lateinit vars effectively did.
+ *
+ * STAGE 6 MOVE -- 2026-11-11: `db` dropped from that list - it's private on
+ * App now, and this class's own `db get() = app.db` delegate is gone with
+ * it. See the crash-guard block's own STAGE 6 MOVE comment for what forces
+ * AppDatabase.create() in its place.
  */
 
 import android.content.Intent
@@ -119,8 +124,13 @@ class MainActivity : ComponentActivity() {
     // STAGE 2 MOVE -- 2026-11-11, still true after Stage 3: these five live on App
     // (Application), not here - see App.kt. `get()` so the crash-guard block in
     // onCreate below can still force first construction with a bare statement.
+    //
+    // STAGE 6 MOVE -- 2026-11-11: `db` itself is private on App as of this stage (see
+    // App.kt), so this class can no longer hold a `get() = app.db` delegate at all -
+    // removed outright rather than reworded, since nothing in this file used `db` for
+    // anything other than the onCreate crash-guard statement below, which now forces
+    // `novelRepository` instead (see that statement's own updated comment).
     private val app: App get() = application as App
-    private val db get() = app.db
     private val scanner get() = app.scanner
     private val prefsManager get() = app.prefsManager
     private val contentRepo get() = app.contentRepo
@@ -234,8 +244,15 @@ class MainActivity : ComponentActivity() {
         // Referencing each one as a bare statement is deliberate: it's what forces the
         // lazy's first construction to happen right here, inside this try/catch,
         // instead of wherever the first real use further down happens to be.
+        //
+        // STAGE 6 MOVE -- 2026-11-11: `db` is private on App now, so it can't be
+        // referenced from here directly any more - `novelRepository` takes its place.
+        // novelRepository's own `by lazy { NovelRepository(db.novelDao()) }` still
+        // reaches `db` first thing, so forcing novelRepository's construction here
+        // forces AppDatabase.create() exactly as early as the bare `db` statement
+        // used to, preserving the crash-guard behavior this block exists for.
         try {
-            db
+            app.novelRepository
             scanner
             prefsManager
             contentRepo

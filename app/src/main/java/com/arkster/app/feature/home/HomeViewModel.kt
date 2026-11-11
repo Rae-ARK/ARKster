@@ -23,16 +23,24 @@ package com.arkster.app.feature.home
  * one, owns the actual novel list and scan state) plus hasLibrary, read
  * directly from PreferencesManager the same reactive way MainActivity used
  * to with collectAsState.
+ *
+ * STAGE 6 MOVE -- 2026-11-11
+ * Took `db: AppDatabase` before this patch and called readingProgressDao()/
+ * chapterDao() directly in lastReadChapterFor - now takes
+ * ChapterRepository/ReadingProgressRepository instead, same "nothing above
+ * domain/ touches a Dao directly" rule every other call site in this patch
+ * follows.
  */
 
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.arkster.app.core.data.LibrarySession
-import com.arkster.app.core.database.AppDatabase
 import com.arkster.app.core.database.NovelEntity
 import com.arkster.app.core.datastore.PreferencesManager
 import com.arkster.app.domain.booksource.UnsupportedSource
+import com.arkster.app.domain.repository.ChapterRepository
+import com.arkster.app.domain.repository.ReadingProgressRepository
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
@@ -46,7 +54,8 @@ data class HomeUiState(
 )
 
 class HomeViewModel(
-    private val db: AppDatabase,
+    private val chapterRepository: ChapterRepository,
+    private val readingProgressRepository: ReadingProgressRepository,
     private val prefsManager: PreferencesManager,
     private val librarySession: LibrarySession
 ) : ViewModel() {
@@ -94,7 +103,7 @@ class HomeViewModel(
     // logic as MainActivity's onContinueReading. Returns null when there's no saved
     // progress (caller falls back to opening NovelDetail instead, same as before).
     suspend fun lastReadChapterFor(novel: NovelEntity) = run {
-        val lastProgress = db.readingProgressDao().forNovel(novel.id) ?: return@run null
-        db.chapterDao().findById(lastProgress.chapterId)
+        val lastProgress = readingProgressRepository.forNovel(novel.id) ?: return@run null
+        chapterRepository.findById(lastProgress.chapterId)
     }
 }

@@ -25,13 +25,21 @@ package com.arkster.app.feature.noveldetail
  * ViewModel owns a private snapshot rather than observing a shared Flow the
  * way FictionBrowseViewModel's `novels` does, since chapters/overrides
  * don't change anywhere else while this screen isn't visible.
+ *
+ * STAGE 6 MOVE -- 2026-11-11
+ * Took `db: AppDatabase` before this patch and called novelDao()/
+ * chapterDao()/chapterOverrideDao()/arcDao() directly - now takes
+ * NovelRepository/ChapterRepository/ArcRepository instead.
+ * `loadEffectiveChapters(db, novelId)` becomes
+ * `chapterRepository.getEffectiveChapters(novelId)` - see
+ * ChapterRepository's own STAGE 6 MOVE header for why that merge logic
+ * moved there (EffectiveChapters.kt is deleted this patch).
  */
 
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.arkster.app.core.data.LibrarySession
-import com.arkster.app.core.database.AppDatabase
 import com.arkster.app.core.database.ArcEntity
 import com.arkster.app.core.database.ChapterEntity
 import com.arkster.app.core.database.ChapterOverrideEntity
@@ -40,7 +48,9 @@ import com.arkster.app.core.database.NovelStatus
 import com.arkster.app.core.navigation.NovelDetailRoute
 import com.arkster.app.domain.metadata.GoogleBooksMetadataProvider
 import com.arkster.app.domain.metadata.NovelMetadataCandidate
-import com.arkster.app.domain.repository.loadEffectiveChapters
+import com.arkster.app.domain.repository.ArcRepository
+import com.arkster.app.domain.repository.ChapterRepository
+import com.arkster.app.domain.repository.NovelRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -57,7 +67,9 @@ sealed class MetadataSearchState {
 
 class NovelDetailViewModel(
     savedStateHandle: SavedStateHandle,
-    private val db: AppDatabase,
+    private val novelRepository: NovelRepository,
+    private val chapterRepository: ChapterRepository,
+    private val arcRepository: ArcRepository,
     private val metadataProvider: GoogleBooksMetadataProvider,
     private val librarySession: LibrarySession
 ) : ViewModel() {
@@ -87,16 +99,16 @@ class NovelDetailViewModel(
     }
 
     // Loads the novel entity plus the effective (overrides-applied) chapter list -
-    // see domain/repository/EffectiveChapters.kt for why that merge lives there
+    // see ChapterRepository.getEffectiveChapters for why that merge lives there
     // rather than being duplicated here and in ReaderViewModel.
     fun load() {
         viewModelScope.launch {
-            _novel.value = db.novelDao().findById(novelId)
-            val effective = loadEffectiveChapters(db, novelId)
+            _novel.value = novelRepository.findById(novelId)
+            val effective = chapterRepository.getEffectiveChapters(novelId)
             _chapters.value = effective.chapters
             _overriddenChapterIds.value = effective.overriddenChapterIds
             _arcStartChapterIds.value = effective.arcStartChapterIds
-            _arcs.value = db.arcDao().forNovel(novelId)
+            _arcs.value = arcRepository.forNovel(novelId)
         }
     }
 
@@ -106,14 +118,14 @@ class NovelDetailViewModel(
     // change, same as MainActivity's onChapterSelected used to do inline.
     fun markChapterOpened() {
         viewModelScope.launch {
-            db.novelDao().updateReadingStatus(novelId, NovelStatus.IN_PROGRESS.name)
+            novelRepository.updateReadingStatus(novelId, NovelStatus.IN_PROGRESS.name)
             librarySession.refreshRecentlyRead()
         }
     }
 
     fun resizePages(pageSize: Int) {
         viewModelScope.launch {
-            db.novelDao().updatePageSize(novelId, pageSize)
+            novelRepository.updatePageSize(novelId, pageSize)
         }
     }
 
@@ -144,7 +156,7 @@ class NovelDetailViewModel(
         val currentNovel = _novel.value ?: return
         viewModelScope.launch {
             try {
-                db.novelDao().updateMetadata(
+                novelRepository.updateMetadata(
                     novelId = currentNovel.id,
                     description = candidate.description,
                     genres = candidate.categories.joinToString(", ").ifBlank { null },
@@ -153,7 +165,7 @@ class NovelDetailViewModel(
                     externalSourceUrl = candidate.infoLink,
                     fetchedAt = System.currentTimeMillis()
                 )
-                _novel.value = db.novelDao().findById(currentNovel.id)
+                _novel.value = novelRepository.findById(currentNovel.id)
                 _metadataSearchState.value = MetadataSearchState.Idle
             } catch (e: Exception) {
                 _metadataSearchState.value = MetadataSearchState.Error(
@@ -173,7 +185,7 @@ class NovelDetailViewModel(
     // edit matches the scanned default again, any stale override for that chapter is
     // removed instead of being kept around with stale values.
     suspend fun saveChapterEdits(edited: List<ChapterEntity>, arcStartIds: Set<String>) {
-        val raw = db.chapterDao().forNovel(novelId) // natural scan order, no overrides
+        val raw = chapterRepository.forNovel(novelId) // natural scan order, no overrides
         val rawById = raw.associateBy { it.id }
         val rawIndexById = raw.withIndex().associate { (i, c) -> c.id to i }
 
@@ -184,7 +196,7 @@ class NovelDetailViewModel(
             val isArcStart = chapter.id in arcStartIds
 
             if (titleOverride != null || positionOverride != null || isArcStart) {
-                db.chapterOverrideDao().upsert(
+                chapterRepository.upsertOverride(
                     ChapterOverrideEntity(
                         id = UUID.nameUUIDFromBytes("override:${chapter.id}".toByteArray()).toString(),
                         chapterId = chapter.id,
@@ -194,7 +206,7 @@ class NovelDetailViewModel(
                     )
                 )
             } else {
-                db.chapterOverrideDao().delete(chapter.id)
+                chapterRepository.deleteOverride(chapter.id)
             }
         }
         load()

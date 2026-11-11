@@ -18,6 +18,15 @@ package com.arkster.app.core.navigation
  * branch in MainActivity.kt - worth diffing against git history there if a
  * destination's wiring here ever looks surprising; nothing changed in what
  * each screen receives or does, only where that plumbing lives.
+ *
+ * STAGE 6 MOVE -- 2026-11-11
+ * ChapterLoadErrorRoute's destination below called `app.db.chapterDao()`/
+ * `app.db.novelDao()` directly - the one call site in this class, easy to
+ * miss since it's not a ViewModel constructor argument the way every other
+ * Dao-touching class in this stage was. It's a real call site like any
+ * other (`app.db` is private as of this stage specifically so nothing can
+ * still reach a Dao this way), so it moves to `app.chapterRepository`/
+ * `app.novelRepository` the same as everywhere else.
  */
 
 import android.net.Uri
@@ -324,13 +333,13 @@ fun AppNavHost(
             // ceremony with nothing to hold.
             var chapterTitle by remember { mutableStateOf("") }
             LaunchedEffect(chapterId) {
-                chapterTitle = app.db.chapterDao().findById(chapterId)?.title ?: ""
+                chapterTitle = app.chapterRepository.findById(chapterId)?.title ?: ""
             }
             ChapterLoadErrorScreen(
                 chapterTitle = chapterTitle,
                 onRetry = {
                     coroutineScope.launch {
-                        val chapter = app.db.chapterDao().findById(chapterId)
+                        val chapter = app.chapterRepository.findById(chapterId)
                         if (chapter != null) {
                             navigateToChapter(navController, app.contentRepo, novelId, chapter, replaceCurrent = true)
                         }
@@ -338,7 +347,7 @@ fun AppNavHost(
                 },
                 onBack = {
                     coroutineScope.launch {
-                        val novel = app.db.novelDao().findById(novelId)
+                        val novel = app.novelRepository.findById(novelId)
                         if (novel != null) {
                             navController.navigate(NovelDetailRoute.createRoute(novel.id)) {
                                 popUpTo(ChapterLoadErrorRoute.route) { inclusive = true }

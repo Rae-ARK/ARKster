@@ -44,12 +44,39 @@ import com.arkster.app.core.data.LibrarySession
 import com.arkster.app.core.database.AppDatabase
 import com.arkster.app.core.datastore.PreferencesManager
 import com.arkster.app.domain.metadata.GoogleBooksMetadataProvider
+import com.arkster.app.domain.repository.ArcRepository
+import com.arkster.app.domain.repository.AuthorRepository
+import com.arkster.app.domain.repository.ChapterRepository
+import com.arkster.app.domain.repository.NovelRepository
+import com.arkster.app.domain.repository.ReadingProgressRepository
+import com.arkster.app.domain.repository.ScanFingerprintRepository
 import com.arkster.app.domain.repository.TextChapterContentRepository
 import com.arkster.app.scanner.ScannerImpl
 
 class App : Application() {
-    val db: AppDatabase by lazy { AppDatabase.create(this) }
-    val scanner: ScannerImpl by lazy { ScannerImpl(this) }
+    // STAGE 6 MOVE -- 2026-11-11: private as of this stage - every other property
+    // below reaches the Daos it needs through a repository instead, and nothing
+    // outside this class should still be able to get at a Dao directly (that's the
+    // point of the stage). db itself still has to be constructed somewhere, and the
+    // crash-guard reasoning in this file's header still applies to it specifically.
+    private val db: AppDatabase by lazy { AppDatabase.create(this) }
+
+    // The three repositories the refactor doc names explicitly, plus the four extra
+    // Daos (Arc/ReadingProgress/ScanFingerprint, plus ChapterOverride folded into
+    // ChapterRepository) that were reached past domain/ the same as the named three -
+    // see each repository's own STAGE 6 MOVE header for why it wasn't folded into one
+    // of the other three instead.
+    val novelRepository: NovelRepository by lazy { NovelRepository(db.novelDao()) }
+    val chapterRepository: ChapterRepository by lazy { ChapterRepository(db.chapterDao(), db.chapterOverrideDao()) }
+    val authorRepository: AuthorRepository by lazy { AuthorRepository(db.authorDao()) }
+    val arcRepository: ArcRepository by lazy { ArcRepository(db.arcDao()) }
+    val readingProgressRepository: ReadingProgressRepository by lazy { ReadingProgressRepository(db.readingProgressDao()) }
+    val scanFingerprintRepository: ScanFingerprintRepository by lazy { ScanFingerprintRepository(db.scanFingerprintDao()) }
+
+    // STAGE 6 MOVE -- 2026-11-11: takes the repository collaborators it writes
+    // through during a scan pass instead of `db` directly - see ScannerImpl's own
+    // STAGE 6 MOVE header.
+    val scanner: ScannerImpl by lazy { ScannerImpl(this, chapterRepository, arcRepository, scanFingerprintRepository) }
     val prefsManager: PreferencesManager by lazy { PreferencesManager(this) }
     val contentRepo: TextChapterContentRepository by lazy { TextChapterContentRepository(this) }
 
@@ -68,5 +95,11 @@ class App : Application() {
     // takes both as constructor args); unlike db specifically, it holds no
     // resource that can fail to open, so there's no crash-guard reason for
     // the laziness the way there is there.
-    val librarySession: LibrarySession by lazy { LibrarySession(db, scanner) }
+    //
+    // STAGE 6 MOVE -- 2026-11-11: takes novelRepository/authorRepository/
+    // readingProgressRepository instead of `db` directly - see LibrarySession's own
+    // STAGE 6 MOVE header.
+    val librarySession: LibrarySession by lazy {
+        LibrarySession(novelRepository, authorRepository, readingProgressRepository, scanner)
+    }
 }

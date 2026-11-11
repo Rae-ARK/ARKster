@@ -15,6 +15,14 @@ package com.arkster.app.scanner
  * output, not novel-construction logic - see
  * docs/arkster/foundational/author-and-reader-model.md's "Linking a fiction
  * to an author" for the resolution order this implements.
+ *
+ * STAGE 6 MOVE -- 2026-11-11
+ * resolveAuthorAvatarUri/findAuthorAvatarUri moved out to
+ * AuthorAvatarResolver.kt (Real Subject) + CachingAuthorAvatarResolverProxy.kt
+ * (Proxy) - see those files' headers. This class now takes an AvatarSource
+ * collaborator instead of owning avatar-resolution logic directly, same
+ * "inject the collaborator, default to the caching Proxy" shape ScannerImpl
+ * uses for CoverSource.
  */
 
 import android.content.Context
@@ -22,7 +30,10 @@ import androidx.documentfile.provider.DocumentFile
 import com.arkster.app.core.database.AuthorEntity
 import org.json.JSONObject
 
-class AuthorScanner(private val context: Context) {
+class AuthorScanner(
+    private val context: Context,
+    private val avatarSource: AvatarSource = CachingAuthorAvatarResolverProxy()
+) {
 
     private data class AuthorMetadata(
         val id: String?,
@@ -41,28 +52,6 @@ class AuthorScanner(private val context: Context) {
 
     fun findAuthorsFolder(root: DocumentFile): DocumentFile? =
         root.listFiles().firstOrNull { it.isDirectory && it.name?.equals("authors", ignoreCase = true) == true }
-
-    // Resolves an author.json "avatar" filename against the authors/ folder, the same
-    // way CoverResolver.findCoverUri resolves cover.* against a novel folder.
-    private fun resolveAuthorAvatarUri(authorsFolder: DocumentFile, avatarFilename: String): String? =
-        authorsFolder.listFiles().firstOrNull {
-            it.isFile && it.name?.equals(avatarFilename, ignoreCase = true) == true
-        }?.uri?.toString()
-
-    // Convention-based fallback for when author.json doesn't specify an "avatar" (or
-    // has none at all): a same-folder image named after the author, e.g.
-    // "authors/<name>.png" or "authors/<id>.png", the same pattern as a novel/arc's
-    // cover.*. Tries the id first (usually already filename-safe, lowercase) then the
-    // display name, and accepts jpg/jpeg/png/webp.
-    private fun findAuthorAvatarUri(authorsFolder: DocumentFile, id: String, name: String): String? {
-        val images = authorsFolder.listFiles().filter {
-            it.isFile && it.name?.matches(Regex("(?i).*\\.(jpg|jpeg|png|webp)$")) == true
-        }
-        fun matching(key: String): String? = images.firstOrNull {
-            it.name?.substringBeforeLast('.')?.equals(key, ignoreCase = true) == true
-        }?.uri?.toString()
-        return matching(id) ?: matching(name)
-    }
 
     // Reads and parses one authors/<id>.json file. See "authors/<id>.json schema" in
     // docs/arkster/foundational/author-and-reader-model.md for the full field list.
@@ -138,9 +127,13 @@ class AuthorScanner(private val context: Context) {
                     name = name,
                     // Explicit "avatar" field in author.json wins if it resolves;
                     // otherwise fall back to a same-folder authors/<id-or-name>.png
-                    // (jpg/webp also accepted) - see findAuthorAvatarUri above.
-                    avatarUri = parsed?.avatar?.let { resolveAuthorAvatarUri(authorsFolder, it) }
-                        ?: findAuthorAvatarUri(authorsFolder, id, name),
+                    // (jpg/webp also accepted) - see AuthorAvatarResolver.
+                    avatarUri = avatarSource.resolveAvatarUri(
+                        authorsFolder = authorsFolder,
+                        id = id,
+                        name = name,
+                        explicitAvatarFilename = parsed?.avatar
+                    ),
                     bio = parsed?.bio,
                     joined = parsed?.joined,
                     location = parsed?.location,

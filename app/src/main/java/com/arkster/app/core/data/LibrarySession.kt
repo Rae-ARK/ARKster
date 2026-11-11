@@ -33,12 +33,23 @@ package com.arkster.app.core.data
  * instead of needing the withContext(Dispatchers.Main) hops
  * mutableStateListOf required in the old Activity-owned version - a
  * StateFlow's `.value`/`.update` are safe from any thread.
+ *
+ * STAGE 6 MOVE -- 2026-11-11
+ * Took `db: AppDatabase` before this patch and called novelDao()/authorDao()/
+ * readingProgressDao() directly - now takes NovelRepository/AuthorRepository/
+ * ReadingProgressRepository instead, same "nothing above domain/ touches a
+ * Dao directly" rule App.kt's other construction sites follow as of this
+ * stage. scanner.scanChaptersForNovel's call site below also drops the `db`
+ * argument it used to pass through - ScannerImpl now owns its own repository
+ * collaborators (see that class's own STAGE 6 MOVE header).
  */
 
 import android.net.Uri
-import com.arkster.app.core.database.AppDatabase
 import com.arkster.app.core.database.NovelEntity
 import com.arkster.app.domain.booksource.UnsupportedSource
+import com.arkster.app.domain.repository.AuthorRepository
+import com.arkster.app.domain.repository.NovelRepository
+import com.arkster.app.domain.repository.ReadingProgressRepository
 import com.arkster.app.scanner.ScannerImpl
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -46,7 +57,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
 class LibrarySession(
-    private val db: AppDatabase,
+    private val novelRepository: NovelRepository,
+    private val authorRepository: AuthorRepository,
+    private val readingProgressRepository: ReadingProgressRepository,
     private val scanner: ScannerImpl
 ) {
     private val _novels = MutableStateFlow<List<NovelEntity>>(emptyList())
@@ -134,7 +147,7 @@ class LibrarySession(
                         // copy() lets `scanned.authorId` (including null) win outright, the
                         // same way `coverUri` already does by simply not appearing in this
                         // copy() call's argument list at all.
-                        val existing = db.novelDao().findById(scanned.id)
+                        val existing = novelRepository.findById(scanned.id)
                         val novel = if (existing != null) {
                             val remoteFetched = existing.metadataFetchedAt != null
                             scanned.copy(
@@ -159,7 +172,7 @@ class LibrarySession(
                                 metadataFetchedAt = existing.metadataFetchedAt
                             )
                         } else scanned
-                        db.novelDao().upsert(novel)
+                        novelRepository.upsert(novel)
                         seenNovelIds.add(novel.id)
                         _novels.update { current ->
                             val idx = current.indexOfFirst { it.id == novel.id }
@@ -167,7 +180,7 @@ class LibrarySession(
                         }
                         // Scan this novel's chapters/arcs using the folder scanRoot already
                         // resolved, instead of re-listing the root and searching by name again.
-                        scanner.scanChaptersForNovel(novelFolder, novel.id, db) { message ->
+                        scanner.scanChaptersForNovel(novelFolder, novel.id) { message ->
                             _scanMessage.value = "Scanning ${novel.title}: $message"
                         }
                     } catch (e: Exception) {
@@ -176,7 +189,7 @@ class LibrarySession(
                 },
                 onAuthorsDiscovered = { discoveredAuthors, authorsFolderFoundThisPass ->
                     authorsFolderFound = authorsFolderFoundThisPass
-                    discoveredAuthors.forEach { db.authorDao().upsert(it) }
+                    discoveredAuthors.forEach { authorRepository.upsert(it) }
                     // See bugs.md Bug 6: only prune authors that scan didn't see this time
                     // when authors/ was actually found - an empty discoveredAuthors list
                     // because authorsFolder itself couldn't be found (transient SAF hiccup)
@@ -184,8 +197,8 @@ class LibrarySession(
                     // decideStaleNovels for novels (see ScanReconcile.kt).
                     if (authorsFolderFoundThisPass) {
                         val seenIds = discoveredAuthors.map { it.id }.toSet()
-                        db.authorDao().all().filter { it.id !in seenIds }.forEach { stale ->
-                            db.authorDao().delete(stale.id)
+                        authorRepository.all().filter { it.id !in seenIds }.forEach { stale ->
+                            authorRepository.delete(stale.id)
                         }
                     }
                 },
@@ -202,8 +215,8 @@ class LibrarySession(
                     // onScanCompleted (never fired on an aborted/partial scan - see
                     // ScannerImpl.scanRoot), means the UI only ever loses a novel when
                     // this scan actually confirmed its folder is gone.
-                    val staleIds = db.novelDao().all().map { it.id }.filter { it !in seenNovelIds }.toSet()
-                    staleIds.forEach { db.novelDao().delete(it) }
+                    val staleIds = novelRepository.all().map { it.id }.filter { it !in seenNovelIds }.toSet()
+                    staleIds.forEach { novelRepository.delete(it) }
                     if (staleIds.isNotEmpty()) {
                         _novels.update { current -> current.filterNot { it.id in staleIds } }
                     }
@@ -232,11 +245,11 @@ class LibrarySession(
     // nothing here observes reactively, so callers that just wrote one re-trigger
     // this explicitly rather than this class polling on a timer.
     suspend fun refreshRecentlyRead() {
-        val ids = db.readingProgressDao().recentNovelIds()
+        val ids = readingProgressRepository.recentNovelIds()
         val byId = _novels.value.associateBy { it.id }
         _recentlyRead.value = ids.mapNotNull { byId[it] }
 
-        val inProgress = db.novelDao().byStatus("IN_PROGRESS")
+        val inProgress = novelRepository.byStatus("IN_PROGRESS")
         _inProgressNovels.value = inProgress
     }
 

@@ -50,12 +50,24 @@ package com.arkster.app.scanner
  * today's silent-skip behavior exactly as before. See
  * domain/booksource/BookSourceFactory.kt and
  * domain/booksource/FolderSource.kt for the rest of this stage.
+ *
+ * STAGE 6 MOVE -- 2026-11-11
+ * scanChaptersForNovel/parseChaptersInFolder used to take `db: AppDatabase`
+ * and call scanFingerprintDao()/arcDao()/chapterDao() directly - the
+ * "nothing above domain/ touches a Dao directly" rule doesn't exempt the
+ * scanner just because it's the data-writing layer, so this class now takes
+ * ChapterRepository/ArcRepository/ScanFingerprintRepository as constructor
+ * collaborators (same "inject it, App.kt owns the instance" shape as
+ * chapterTitleParser/fingerprintCalculator/etc. above) and scanChaptersForNovel
+ * no longer takes a `db` parameter at all - LibrarySession's call site
+ * updated to match. coverResolver's declared type also changes from
+ * CoverResolver to CoverSource, now defaulting to CachingCoverResolverProxy -
+ * see that file's header for why.
  */
 
 import android.content.Context
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
-import com.arkster.app.core.database.AppDatabase
 import com.arkster.app.core.database.ArcEntity
 import com.arkster.app.core.database.AuthorEntity
 import com.arkster.app.core.database.ChapterEntity
@@ -63,6 +75,9 @@ import com.arkster.app.core.database.NovelEntity
 import com.arkster.app.domain.booksource.BookSourceFactory
 import com.arkster.app.domain.booksource.SourceClassification
 import com.arkster.app.domain.booksource.UnsupportedSource
+import com.arkster.app.domain.repository.ArcRepository
+import com.arkster.app.domain.repository.ChapterRepository
+import com.arkster.app.domain.repository.ScanFingerprintRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.UUID
@@ -74,10 +89,15 @@ import java.util.UUID
  * resolution, author-folder parsing, fingerprinting, and NovelEntity assembly to the
  * focused collaborators listed above.
  */
-class ScannerImpl(private val context: Context) {
+class ScannerImpl(
+    private val context: Context,
+    private val chapterRepository: ChapterRepository,
+    private val arcRepository: ArcRepository,
+    private val scanFingerprintRepository: ScanFingerprintRepository
+) {
 
     private val chapterTitleParser = ChapterTitleParser()
-    private val coverResolver = CoverResolver()
+    private val coverResolver: CoverSource = CachingCoverResolverProxy()
     private val fingerprintCalculator = FingerprintCalculator()
     private val authorScanner = AuthorScanner(context)
     private val novelEntityBuilder = NovelEntityBuilder(context)
@@ -257,7 +277,6 @@ class ScannerImpl(private val context: Context) {
     suspend fun scanChaptersForNovel(
         novelFolder: DocumentFile,
         novelId: String,
-        db: AppDatabase,
         onProgress: suspend (message: String) -> Unit = {}
     ) = withContext(Dispatchers.IO) {
       try {
@@ -265,7 +284,7 @@ class ScannerImpl(private val context: Context) {
         val fingerprint = fingerprintCalculator.computeFingerprint(novelFolder, novelId)
 
         // Check if we can skip rescan (incremental optimization)
-        val existingFingerprint = db.scanFingerprintDao().forNovel(novelId)
+        val existingFingerprint = scanFingerprintRepository.forNovel(novelId)
         if (existingFingerprint != null && existingFingerprint.scanVersion == FingerprintCalculator.CURRENT_SCAN_VERSION &&
             existingFingerprint.lastModified == fingerprint.lastModified &&
             existingFingerprint.size == fingerprint.size &&
@@ -313,34 +332,34 @@ class ScannerImpl(private val context: Context) {
             val arcId = UUID.nameUUIDFromBytes("${novelId}:${arcFolder.uri}".toByteArray()).toString()
             val arcCoverUri = coverResolver.findCoverUri(arcFolder)
             val arc = ArcEntity(id = arcId, novelId = novelId, name = arcName, coverUri = arcCoverUri, position = idx)
-            db.arcDao().upsert(arc)
+            arcRepository.upsert(arc)
             arcs[arcFolder.uri.toString()] = arc
             seenArcIds.add(arcId)
         }
         // Remove arcs whose folder no longer exists (chapters under it fall back to
         // novel-level via the ON DELETE SET NULL foreign key rather than being deleted).
-        val existingArcs = db.arcDao().forNovel(novelId)
+        val existingArcs = arcRepository.forNovel(novelId)
         existingArcs.filter { it.id !in seenArcIds }.forEach { stale ->
-            db.arcDao().delete(stale.id)
+            arcRepository.delete(stale.id)
         }
 
         // Parse chapter files from root and arc subfolders, tracking which chapter IDs
         // are still present so we can remove only the ones that truly vanished.
         onProgress("Parsing chapters...")
         val seenChapterIds = mutableSetOf<String>()
-        seenChapterIds += parseChaptersInFolder(novelFolder, novelId, null, db)
+        seenChapterIds += parseChaptersInFolder(novelFolder, novelId, null)
         for (arcFolder in arcFolders) {
             val arcId = arcs[arcFolder.uri.toString()]?.id
-            seenChapterIds += parseChaptersInFolder(arcFolder, novelId, arcId, db)
+            seenChapterIds += parseChaptersInFolder(arcFolder, novelId, arcId)
         }
-        val existingChapters = db.chapterDao().forNovel(novelId)
+        val existingChapters = chapterRepository.forNovel(novelId)
         existingChapters.filter { it.id !in seenChapterIds }.forEach { stale ->
-            db.chapterDao().delete(stale.id)
+            chapterRepository.delete(stale.id)
         }
 
         // Save fingerprint
         onProgress("Saving fingerprint...")
-        db.scanFingerprintDao().upsert(fingerprint)
+        scanFingerprintRepository.upsert(fingerprint)
       } catch (e: SecurityException) {
           // Permission to this novel's folder was revoked mid-scan - skip it instead of
           // taking down the whole library scan (and the app) with it.
@@ -353,8 +372,7 @@ class ScannerImpl(private val context: Context) {
     private suspend fun parseChaptersInFolder(
         folder: DocumentFile,
         novelId: String,
-        arcId: String?,
-        db: AppDatabase
+        arcId: String?
     ): List<String> = withContext(Dispatchers.IO) {
         val files = folder.listFiles().filter { it.isFile && it.name?.matches(Regex("(?i).*\\.(txt|md)$")) == true }
         val ids = mutableListOf<String>()
@@ -370,7 +388,7 @@ class ScannerImpl(private val context: Context) {
                 sortTier = parsed.sortTier,
                 sourcePath = file.uri.toString()
             )
-            db.chapterDao().upsert(chapter)
+            chapterRepository.upsert(chapter)
             ids.add(chapterId)
         }
         ids

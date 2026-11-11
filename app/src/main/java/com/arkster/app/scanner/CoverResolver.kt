@@ -7,9 +7,20 @@ package com.arkster.app.scanner
  * docs/arkster/implementation/oop-modular-monolith-refactor.md
  *
  * Behavior unchanged from ScannerImpl's private findCoverUri().
+ *
+ * STAGE 6 MOVE -- 2026-11-11
+ * Extracted the CoverSource interface so this class has a seam a Proxy can
+ * sit in front of - see CachingCoverResolverProxy.kt, the real/proxy pairing
+ * the refactor doc's design-decisions section names for this exact case
+ * ("Proxy — cache-on-first-access resolution ... cover/avatar URIs").
+ * CoverResolver itself is unchanged other than implementing this interface.
  */
 
 import androidx.documentfile.provider.DocumentFile
+
+interface CoverSource {
+    fun findCoverUri(folder: DocumentFile): String?
+}
 
 /**
  * Resolves a novel or arc folder's cover image. See bugs.md Bug 3a: this used
@@ -18,10 +29,14 @@ import androidx.documentfile.provider.DocumentFile
  * prefer an exact "cover.<ext>" match if one exists (keeps today's convention
  * as the unambiguous default), otherwise fall back to any image in the folder
  * whose name contains "cover" as a standalone word.
+ *
+ * This is the Proxy pattern's Real Subject (see CachingCoverResolverProxy) -
+ * every call does a real SAF `listFiles()` + regex pass, no caching of its
+ * own.
  */
-class CoverResolver {
+class CoverResolver : CoverSource {
 
-    fun findCoverUri(folder: DocumentFile): String? {
+    override fun findCoverUri(folder: DocumentFile): String? {
         val images = folder.listFiles().filter {
             it.isFile && it.name?.matches(Regex("(?i).*\\.(jpg|jpeg|png|webp)$")) == true
         }
