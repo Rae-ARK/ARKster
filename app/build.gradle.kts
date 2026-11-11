@@ -150,6 +150,15 @@ dependencies {
 
     // Lifecycle
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.6.2")
+    // STAGE 3 MOVE -- 2026-11-11: navigation-compose:2.7.5 below pulls in enough of
+    // these transitively to *compile* against in some versions, but not reliably
+    // enough to depend on - viewModel() (AppNavHost.kt) needs
+    // lifecycle-viewmodel-compose and collectAsStateWithLifecycle() (used at every
+    // destination in AppNavHost.kt) needs lifecycle-runtime-compose. Declared
+    // explicitly, pinned to the same 2.6.2 already used above, rather than relying on
+    // whatever navigation-compose happens to resolve.
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.6.2")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.6.2")
 
     // Coil for images. coil-compose (not the bare coil artifact) is needed for
     // AsyncImage, used to render remote cover thumbnails in the metadata match picker.

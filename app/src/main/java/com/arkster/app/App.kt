@@ -40,6 +40,7 @@ package com.arkster.app
  */
 
 import android.app.Application
+import com.arkster.app.core.data.LibrarySession
 import com.arkster.app.core.database.AppDatabase
 import com.arkster.app.core.datastore.PreferencesManager
 import com.arkster.app.domain.metadata.GoogleBooksMetadataProvider
@@ -58,4 +59,14 @@ class App : Application() {
     // MainActivity.kt's history (git blame) if that reasoning is ever in
     // doubt.
     val metadataProvider: GoogleBooksMetadataProvider by lazy { GoogleBooksMetadataProvider() }
+
+    // STAGE 3 MOVE -- 2026-11-11: joins the properties above for the same
+    // Singleton reasoning, not because Stage 2 missed it - LibrarySession
+    // (core/data/LibrarySession.kt) didn't exist until Stage 3 pulled the
+    // novel list/scan-state fields out of MainActivity. `by lazy` here is
+    // purely for construction-order consistency with db/scanner above (it
+    // takes both as constructor args); unlike db specifically, it holds no
+    // resource that can fail to open, so there's no crash-guard reason for
+    // the laziness the way there is there.
+    val librarySession: LibrarySession by lazy { LibrarySession(db, scanner) }
 }

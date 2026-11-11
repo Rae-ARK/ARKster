@@ -19,7 +19,42 @@ owning `lateinit var`s — every other reference to `db`/`scanner`/
 `prefsManager`/`contentRepo`/`metadataProvider` in `MainActivity.kt` is
 unchanged. This closes the config-change half of the gap described above;
 the process-death half is still open until Stage 3's `SavedStateHandle`
-work. Stages 3–7 below are not started.
+work.
+**Stage 3 — per-feature ViewModels. Done (this patch).** Open question #3
+resolved as Jetpack Navigation-Compose (`NavController`/`NavHost`), not a
+hand-rolled Mediator — see that question's entry below for why. One
+`ViewModel` per `feature/` package (`HomeViewModel`, `FictionBrowseViewModel`,
+`NovelDetailViewModel`, `ReaderViewModel`, `AuthorViewModel`,
+`SettingsViewModel`), each created via `core/navigation/AppViewModelFactory.kt`
+and backed by `SavedStateHandle` where it owns route args. `MainActivity` is
+now the thin NavHost-host the target layout always described; everything it
+used to own directly moved to `core/navigation/AppNavHost.kt` (the Mediator),
+`core/navigation/Routes.kt` (route templates, replacing `Screen`),
+`core/data/LibrarySession.kt` (the shared, App-scoped novel list/scan state —
+see its header for why that's a Singleton rather than a ViewModel), and the
+per-feature ViewModels themselves. This closes the process-death half of the
+config-change/process-death gap: `NavController` persists the back stack
+(route + args) through its own `Bundle`, and each ViewModel re-derives its
+entity state from the DB via `SavedStateHandle` args rather than holding an
+unparcelable entity directly, the way `Screen.Reader`'s old `content: String`
+field could not survive one. See each new file's own `STAGE 3 MOVE` header
+for exactly what moved from `MainActivity.kt` and why.
+Stages 4–7 below are not started.
+
+**Note on this patch's history:** the ViewModels, routes, and `AppNavHost`
+that make up this stage were first committed (as "stage 2.5") with the
+correct package declarations but the wrong file *paths* — all seven files
+landed at the repo root instead of under `app/src/main/java/com/arkster/app/
+…`, so Gradle never picked them up and the stray root copy of
+`MainActivity.kt` sat inert next to the real one. This patch is that same
+code, moved (`git mv`) to its correct location and completed: the draft
+referenced several things that didn't exist yet (`LibrarySession`,
+`NovelDetailViewModel`, `FictionBrowseViewModel`, `ReaderViewModel`,
+`AppViewModelFactory`, `MetadataSearchState`'s new home, the shared
+`EffectiveChapters.kt` helper Reader and NovelDetail both need for
+Previous/Next) — all now written. Noted here, not just in a commit message,
+because "half-finished and silently never built" is exactly the kind of gap
+this doc exists to keep someone from rediscovering the hard way.
 
 This doc itself is scaffolding for the refactor, not a permanent fixture:
 once the refactor it describes is fully landed, this file is meant to go
@@ -232,13 +267,17 @@ try/catch (preserving the crash-screen behavior for a bad
 before that guard exists. This alone stops those services churning on
 every rotation, ahead of any `ViewModel` work.
 
-### Stage 3 — Per-feature ViewModels (Observer + Memento + Mediator + State). Not started.
-One `ViewModel` per `feature/` package, each exposing `StateFlow`/`State`
-and backed by `SavedStateHandle` for anything that must survive process
-death. `MainActivity`'s `when`-based navigation becomes a coordinator
-(Mediator) wired to these ViewModels. This is the stage that actually
-closes the config-change/process-death gap described above and shrinks
-`MainActivity` down to its intended thin-entry-point shape.
+### Stage 3 — Per-feature ViewModels (Observer + Memento + Mediator + State). Done.
+One `ViewModel` per `feature/` package, each exposing `StateFlow` and backed
+by `SavedStateHandle` for anything that must survive process death (route
+args only — see `Routes.kt`). The Mediator is Navigation-Compose's own
+`NavController`/`NavHost` (`AppNavHost.kt`), resolving open question #3 in
+favor of the more idiomatic, less bespoke option rather than a hand-rolled
+`Screen` + coordinator class. `MainActivity`'s `when`-based navigation and
+every per-screen field it used to own are gone; what's left is exactly the
+thin NavHost-host the target layout described. This closes the
+config-change/process-death gap described above in full — Stage 2 already
+had the config-change half.
 
 ### Stage 4 — `ScannerImpl` decomposition (Facade + Chain of Responsibility + Builder). Not started.
 Split into the thin facade plus `ChapterTitleParser`, `CoverResolver`,
@@ -293,11 +332,14 @@ whichever of Stage 5/EPUB landed second.
    true Gradle multi-module separation? This plan deliberately starts with
    the former — lower risk, no build-script changes, reversible. A real
    module split is a plausible future follow-on, not committed to here.
-3. Hand-rolled `Screen` sealed class + Mediator coordinator (what Stage 3
+3. ~~Hand-rolled `Screen` sealed class + Mediator coordinator (what Stage 3
    assumes) vs. migrating to Jetpack Navigation-Compose's `NavHost`/
-   `NavController`? The latter is more idiomatic and gets deep-linking for
-   free, but is a bigger one-time rewrite of every navigation call site.
-   Needs a decision before Stage 3 starts.
+   `NavController`?~~ **Resolved for Stage 3: Navigation-Compose.** More
+   idiomatic, gets deep-linking for free, and `navigation-compose:2.7.5` was
+   already a declared-but-unused dependency since Stage 1's research (see
+   `Routes.kt`'s header on why routes are plain string templates rather than
+   2.8+'s `@Serializable` routes, given that pinned version). The one-time
+   call-site rewrite this implied landed as part of Stage 3 itself.
 4. Where would Visitor actually earn its place? Not needed to start any
    stage above; revisit only once a real cross-cutting tree operation
    (e.g. a word-count stat) is actually being built.
