@@ -116,6 +116,12 @@ chapter_overrides, scan_fingerprints) → `v3` (reading_progress) → `v4`
 (reading_status) → ... → `v7 → v8` (chapter `sort_tier`, see
 [`scanner-invariants.md`](scanner-invariants.md)).
 
+## v0.3
+
+Bugfix-only release: the fixes behind every rule in
+[`scanner-invariants.md`](scanner-invariants.md). No feature-level change
+to the set above.
+
 ## Not yet built
 
 - EPUB support — in progress, see
@@ -123,4 +129,4 @@ chapter_overrides, scan_fingerprints) → `v3` (reading_progress) → `v4`
 - PDF support, a metadata provider, and other ideas not yet started — see
   [`proposal/`](../proposal/README.md).
 
-**Verified:** 2026-11-10 @ (this patch)
+**Verified:** 2026-11-11 @ (this patch)

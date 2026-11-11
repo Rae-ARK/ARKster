@@ -48,12 +48,16 @@ reading.
 
 ## Current status
 
-**v0.2**, per `app/build.gradle.kts`'s `versionName` — the single source of
-truth the app itself reads back via `BuildConfig.VERSION_NAME`. Library
-scan, novel indexing, arcs, author pages, a Royal Road-style chapter
-reader, and persistent URI storage are all shipped; see
-[`architecture.md`](architecture.md) for the full feature set and
-[`implementation/README.md`](../implementation/README.md) for what's being
-built next.
+**v0.3**, per `app/build.gradle.kts`'s `versionName` — the single source of
+truth the app itself reads back via `BuildConfig.VERSION_NAME`. v0.3 is a
+bugfix-only release on top of v0.2's feature set (the fixes now captured as
+rules in [`scanner-invariants.md`](scanner-invariants.md)) — no new
+user-facing feature has shipped since v0.2. Library scan, novel indexing,
+arcs, author pages, a Royal Road-style chapter reader, and persistent URI
+storage are all shipped; see [`architecture.md`](architecture.md) for the
+full feature set, [`implementation/README.md`](../implementation/README.md)
+for what's being built next, and
+[`proposal/README.md`](../proposal/README.md) for what's documented but
+untouched.
 
-**Verified:** 2026-11-10 @ (this patch)
+**Verified:** 2026-11-11 @ (this patch)

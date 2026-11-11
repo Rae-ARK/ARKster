@@ -32,12 +32,14 @@ folder conventions and data models (current as of a dated snapshot), see
 [ARKium's Android reference doc](https://github.com/Rae-ARK/arkium/blob/main/docs/foundation/ANDROID_REFERENCE.md).
 
 ## Current status
-**v0.2** — see `app/build.gradle.kts`'s `versionName`, the single source of truth the
+**v0.3** — see `app/build.gradle.kts`'s `versionName`, the single source of truth the
 app itself reads back via `BuildConfig.VERSION_NAME` (shown in Settings and on the
-crash screens). Library scan, novel indexing, arcs, author pages, a Royal
-Road-style chapter reader with Reader Preferences, and persistent URI storage are
-all in place; incremental/diff-based rescan now also reconciles deleted novels
-correctly (see `bugs.md`).
+crash screens). v0.3 is a bugfix-only release on top of v0.2's feature set — no new
+user-facing feature has shipped since v0.2. Library scan, novel indexing, arcs,
+author pages, a Royal Road-style chapter reader with Reader Preferences, and
+persistent URI storage are all in place; incremental/diff-based rescan also
+reconciles deleted novels correctly (see
+[`docs/arkster/foundational/scanner-invariants.md`](docs/arkster/foundational/scanner-invariants.md)).
 
 ## Quick start
 1. Clone this repository and open the `/app` folder in Android Studio.
@@ -73,19 +75,22 @@ distributed through Play Protect's usual channel, Android may show an
 apps and not a sign anything is wrong.
 
 ## Documentation
-- [Android design & architecture](docs/ARKster_ANDROID_DESIGN.md) — design overview, storage model, BookSource abstraction
-- [App README](app/README.md) — feature summary and build notes
-- [Scanner POC notes](spec/SCANNER_POC.md) — heuristics and progressive scan UX
-- [Bug reports & fixes](docs/bugs.md) — root-caused bugs and how each was patched, in order
-- `docs/done and dealth with/` — completed roadmaps and staged plans, kept for history:
-  [v0.2 Roadmap](docs/done%20and%20dealth%20with/V0.2_ROADMAP.md),
-  [v0.2 completion summary](docs/done%20and%20dealth%20with/V0.2_COMPLETION_SUMMARY.md),
-  [UI overhaul summary](docs/done%20and%20dealth%20with/UI_OVERHAUL_SUMMARY.md),
-  [Author page & chapter page redesign](docs/done%20and%20dealth%20with/AUTHOR_PAGE_AND_CHAPTER_REDESIGN.md)
+Docs live in [`docs/arkster/`](docs/arkster/README.md), organised by
+lifecycle — start at
+[`docs/arkster/foundational/what-is-arkster.md`](docs/arkster/foundational/what-is-arkster.md):
+- [`foundational/`](docs/arkster/foundational/README.md) — identity, architecture,
+  scanner invariants (the hard-won bugfix rules), the author/reader model, and UI design.
+- [`implementation/`](docs/arkster/implementation/README.md) — work in progress (currently EPUB support).
+- [`proposal/`](docs/arkster/proposal/README.md) — documented but untouched ideas and open bug reports.
+- [App README](app/README.md) — feature summary and build notes.
+- [Scanner POC notes](spec/SCANNER_POC.md) — original heuristics and progressive scan UX notes.
 
 ## Architecture highlights
 - **Room + DataStore**: Indexed library state + lightweight prefs.
-- **BookSource abstraction**: FolderSource (shipped), then EpubSource and PdfSource (later milestones - see `docs/EPUB_SUPPORT.md`).
+- **BookSource abstraction**: FolderSource (shipped); EpubSource is in progress (see
+  [`docs/arkster/implementation/epub-support.md`](docs/arkster/implementation/epub-support.md));
+  PdfSource is a documented idea, not yet started (see
+  [`docs/arkster/proposal/README.md`](docs/arkster/proposal/README.md)).
 - **ChapterContentRepository**: Unified interface for reading chapter text across sources.
 - **Graceful degradation**: Auto-generated covers, best-effort title parsing, user override editor.
 
