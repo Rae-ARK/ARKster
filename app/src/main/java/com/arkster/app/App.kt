@@ -100,6 +100,6 @@ class App : Application() {
     // readingProgressRepository instead of `db` directly - see LibrarySession's own
     // STAGE 6 MOVE header.
     val librarySession: LibrarySession by lazy {
-        LibrarySession(novelRepository, authorRepository, readingProgressRepository, scanner)
+        LibrarySession(novelRepository, authorRepository, readingProgressRepository, scanner, prefsManager)
     }
 }
