@@ -308,6 +308,29 @@ class LibrarySession(
                     )
                     prefsManager.setPendingMissingNovelIds(decision.pendingNext)
                     if (decision.deleteNow.isNotEmpty()) {
+                        // See bugs.md "Folder rename orphans a novel's data": decision.deleteNow
+                        // is exactly detectRenameMatches' candidateStaleIds (novel ids actually
+                        // being deleted THIS pass, not just missing-once), and
+                        // newlyDiscoveredNovelIds above is its candidateNewIds. Runs before the
+                        // deleteNow loop below so a matched old novel's reading_progress/
+                        // chapter_overrides are re-pointed at the new ids first - the old
+                        // novel's own cascade delete then only ever removes rows nothing
+                        // migrated away from it.
+                        if (newlyDiscoveredNovelIds.isNotEmpty()) {
+                            val chapterFilenamesByNovelId =
+                                (decision.deleteNow + newlyDiscoveredNovelIds).associateWith { id ->
+                                    chapterRepository.forNovel(id)
+                                        .map { chapterFilenameFrom(it.sourcePath) }
+                                        .toSet()
+                                }
+                            detectRenameMatches(
+                                candidateStaleIds = decision.deleteNow,
+                                candidateNewIds = newlyDiscoveredNovelIds,
+                                chapterFilenamesByNovelId = chapterFilenamesByNovelId
+                            ).forEach { match ->
+                                migrateRenamedNovel(match.oldNovelId, match.newNovelId)
+                            }
+                        }
                         decision.deleteNow.forEach { novelRepository.delete(it) }
                         _novels.update { current -> current.filterNot { it.id in decision.deleteNow } }
                     }
@@ -327,6 +350,48 @@ class LibrarySession(
         } catch (e: Exception) {
             _scanProgress.value = null
             _scanMessage.value = "Library scan failed: ${e.message}"
+        }
+    }
+
+    // See bugs.md "Folder rename orphans a novel's data": called once per RenameMatch
+    // from onScanCompleted above, before oldNovelId is deleted. Chapter ids are hashed
+    // from the SAF URI the same way novel ids are, so the rename that produced
+    // newNovelId also gave every one of its chapters a new id - detectRenameMatches
+    // only told us the two NOVEL ids are the same folder; re-pointing progress/
+    // overrides still needs this chapter-level id map, built the same way (matching
+    // chapterFilenameFrom(sourcePath) signatures) but one-to-one instead of
+    // novel-wide-set-to-set. A chapter whose filename has no unique match on the new
+    // side (added/removed/renamed in the same pass as the folder rename, or a
+    // duplicate filename within one novel) is simply left out of the map and whatever
+    // pointed at it is not migrated - same fail-closed tradeoff detectRenameMatches
+    // itself documents, rather than guessing.
+    private suspend fun migrateRenamedNovel(oldNovelId: String, newNovelId: String) {
+        val newChapterIdByFilename = chapterRepository.forNovel(newNovelId)
+            .groupBy { chapterFilenameFrom(it.sourcePath) }
+            .filterValues { it.size == 1 }
+            .mapValues { (_, chapters) -> chapters.single().id }
+        val newChapterIdByOldChapterId = chapterRepository.forNovel(oldNovelId).mapNotNull { old ->
+            newChapterIdByFilename[chapterFilenameFrom(old.sourcePath)]?.let { newId -> old.id to newId }
+        }.toMap()
+
+        // One row per novel (ReadingProgressEntity.novelId is its PK) - upserting under
+        // newNovelId adds a new row rather than touching the old one, which disappears
+        // on its own when oldNovelId cascades below.
+        readingProgressRepository.forNovel(oldNovelId)?.let { progress ->
+            val newChapterId = newChapterIdByOldChapterId[progress.chapterId] ?: return@let
+            readingProgressRepository.upsert(
+                progress.copy(novelId = newNovelId, chapterId = newChapterId)
+            )
+        }
+
+        // ChapterOverrideEntity's own PK is `id`, not chapterId, so this needs a fresh id
+        // per migrated row rather than overwriting anything - the old row (still keyed to
+        // the old chapterId) is left for the old chapter's own cascade delete to remove.
+        chapterRepository.overridesForNovel(oldNovelId).forEach { override ->
+            val newChapterId = newChapterIdByOldChapterId[override.chapterId] ?: return@forEach
+            chapterRepository.upsertOverride(
+                override.copy(id = UUID.randomUUID().toString(), chapterId = newChapterId)
+            )
         }
     }
 

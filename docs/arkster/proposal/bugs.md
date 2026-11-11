@@ -38,23 +38,6 @@ odds with this app's diff-based rescan premise, since the "Deletion
 safety" reconciliation in `scanner-invariants.md` only ever covered the
 novel/arc/chapter tree itself, not resolved cover/avatar URIs.
 
-## Folder rename orphans a novel's data
-
-Novel/arc/chapter ids are derived by hashing the SAF tree/child URI
-(`ScannerImpl`'s id generation). On the standard local-storage SAF
-provider a folder's URI is path-based, so renaming a novel folder changes
-its derived id; the next scan treats it as a brand-new novel, and the
-[deletion-safety reconciliation](../foundational/scanner-invariants.md#deletion-safety-a-novel-is-never-deleted-on-one-unseen-pass)
-removes the old id's `reading_progress` and `chapter_overrides` once it's
-gone unseen for two passes. Nothing makes a novel's id survive an ordinary
-rename today. The obvious fix — a stable id written to a sidecar file in
-the novel folder at first scan — needs write access the app doesn't
-currently request or use anywhere (`MainActivity`'s folder picker only
-grants `FLAG_GRANT_READ_URI_PERMISSION`, and there is no
-`createFile`/`openOutputStream` call in `app/src/main`), so this also
-needs a permission-model decision before it can be picked up, not just a
-code change.
-
 ## Fiction Browse's sort options don't sort by what they claim
 
 Of the four options [`ui-design.md`](../foundational/ui-design.md)
