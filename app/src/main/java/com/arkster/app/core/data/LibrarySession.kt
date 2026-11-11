@@ -64,6 +64,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
+import java.util.UUID
 
 class LibrarySession(
     private val novelRepository: NovelRepository,
@@ -73,7 +74,12 @@ class LibrarySession(
     // See bugs.md Bug 11: needed so the two-pass stale-novel confirmation
     // (decideStaleNovels below) can persist pendingMissing across process
     // death, not just within this one in-memory LibrarySession instance.
-    private val prefsManager: PreferencesManager
+    private val prefsManager: PreferencesManager,
+    // See bugs.md "Folder rename orphans a novel's data": migrateRenamedNovel below
+    // re-points a matched old novel's reading_progress/chapter_overrides at its new
+    // chapter ids, which needs the same Dao access ChapterEditor/ScannerImpl already
+    // go through ChapterRepository for - not a new Dao reach-through.
+    private val chapterRepository: ChapterRepository
 ) {
     private val _novels = MutableStateFlow<List<NovelEntity>>(emptyList())
     val novels: StateFlow<List<NovelEntity>> = _novels.asStateFlow()
@@ -158,6 +164,13 @@ class LibrarySession(
         // scanChaptersForNovel's seenChapterIds/seenArcIds already make for a single
         // skipped item.
         val seenNovelIds = mutableSetOf<String>()
+        // See bugs.md "Folder rename orphans a novel's data": novel ids upserted this
+        // pass that did NOT already exist in the DB (the `existing == null` branch
+        // below) - i.e. ids a genuinely new folder OR a renamed folder produced, since
+        // both look identical to the scanner. onScanCompleted below feeds this set,
+        // together with whatever went missing this same pass, to detectRenameMatches
+        // to tell the two apart by chapter-filename signature.
+        val newlyDiscoveredNovelIds = mutableSetOf<String>()
         // See bugs.md Bug 11: novel ids that were already missing as of the
         // previous completed scan pass (and are therefore one more miss away
         // from actually being deleted) - read once up front so onScanCompleted
@@ -206,6 +219,7 @@ class LibrarySession(
                         // same way `coverUri` already does by simply not appearing in this
                         // copy() call's argument list at all.
                         val existing = novelRepository.findById(scanned.id)
+                        if (existing == null) newlyDiscoveredNovelIds.add(scanned.id)
                         val novel = if (existing != null) {
                             val remoteFetched = existing.metadataFetchedAt != null
                             scanned.copy(
