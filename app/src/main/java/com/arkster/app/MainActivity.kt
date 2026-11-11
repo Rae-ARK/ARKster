@@ -19,7 +19,8 @@ package com.arkster.app
  *   Application-scoped singleton, not a ViewModel - see its header for why).
  * - Every other per-screen field and function (loadNovelDetails,
  *   loadAuthorPage, openChapter, saveChapterEdits, saveReadingProgress,
- *   fetchMetadataFor, applyMetadata) -> the matching feature/*/*ViewModel.kt.
+ *   fetchMetadataFor, applyMetadata) -> the matching feature module's
+ *   ViewModel.kt (e.g. feature/noveldetail/NovelDetailViewModel.kt).
  * - The inline `when (currentScreen.value)` block -> core/navigation/AppNavHost.kt.
  *
  * What's left is exactly what the target layout promised: the crash-screen

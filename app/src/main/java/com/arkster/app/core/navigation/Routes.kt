@@ -17,7 +17,8 @@ package com.arkster.app.core.navigation
  *   recreation from process death) - Screen itself was never saved anywhere.
  * - Every route below carries IDs only. Each destination's ViewModel re-derives
  *   the entity it needs from the DB via its SavedStateHandle (see each
- *   feature/*/*ViewModel.kt's `checkNotNull(savedStateHandle[...Arg])`).
+ *   feature module's ViewModel.kt (e.g. NovelDetailViewModel.kt's
+ *   `checkNotNull(savedStateHandle[...Arg])`).
  *   NavController saves these route+args pairs (plain strings) as part of its
  *   own back stack Bundle automatically - this is the "Memento" piece Stage 3
  *   was for, and it falls out of switching to Navigation-Compose rather than
