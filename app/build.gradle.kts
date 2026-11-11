@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "com.arkster.app"
+    namespace = "horizonarkstudio.raeark.arkster"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.arkster.app"
+        applicationId = "horizonarkstudio.raeark.arkster"
         minSdk = 24
         targetSdk = 34
         // Single source of truth for the app's version, anywhere it needs to be shown.
