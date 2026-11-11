@@ -9,12 +9,15 @@ ladder (or write it directly there, staged from rung 0, the way
 
 ## Open bug reports
 
-- **"First image" issue, happens sometimes.** Reported alongside the bugs
-  that became [`scanner-invariants.md`](../foundational/scanner-invariants.md),
-  but never root-caused: no screenshot or repro detail survived (which
-  screen, whether it's a cover or chapter image, what "sometimes"
-  correlates with — first scan vs. rescan, a specific novel, cold start).
-  Needs a fresh repro before anyone can pick it up.
+Tracked in [`bugs.md`](bugs.md), not inlined here — same reason
+`implementation/` links out to each ladder's own file instead of
+embedding it. Currently open:
+
+- [First image issue, happens sometimes](bugs.md#first-image-issue-happens-sometimes)
+- [Persisted folder-grant leak on re-pick](bugs.md#persisted-folder-grant-leak-on-re-pick)
+- [Cover/avatar resolver caches never invalidate](bugs.md#coveravatar-resolver-caches-never-invalidate)
+- [Folder rename orphans a novel's data](bugs.md#folder-rename-orphans-a-novels-data)
+- [Fiction Browse's sort options don't sort by what they claim](bugs.md#fiction-browses-sort-options-dont-sort-by-what-they-claim)
 
 - **Persisted folder-grant leak on re-pick.** The
   [`scanner-invariants.md`](../foundational/scanner-invariants.md#release-the-previous-folder-grant-before-storing-a-new-one)
