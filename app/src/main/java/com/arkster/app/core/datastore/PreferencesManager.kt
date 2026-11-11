@@ -12,6 +12,7 @@ import android.content.Context
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -43,6 +44,13 @@ class PreferencesManager(private val context: Context) {
         // next time instead of resetting it.
         private val READER_FONT_SIZE_KEY = floatPreferencesKey("reader_font_size")
         private val READER_LINE_HEIGHT_KEY = floatPreferencesKey("reader_line_height")
+        // Backs decideStaleNovels' two-pass reconciliation (see ScanReconcile.kt and
+        // docs/arkster/foundational/scanner-invariants.md "Deletion safety"). LibrarySession
+        // reads this once at the top of every scan and rewrites it in onScanCompleted, so a
+        // novel missing on one pass is only actually deleted once it's also missing on the
+        // very next completed pass - this has to survive a process restart (ARKster scans
+        // once per launch), which is why it lives here instead of in-memory.
+        private val PENDING_MISSING_NOVEL_IDS_KEY = stringSetPreferencesKey("pending_missing_novel_ids")
     }
 
     // libraryUri.collect() and theme.collect() run unattended in MainActivity.onCreate,
@@ -85,6 +93,10 @@ class PreferencesManager(private val context: Context) {
         prefs[READER_LINE_HEIGHT_KEY] ?: 1.8f
     }
 
+    val pendingMissingNovelIds: Flow<Set<String>> = safePrefs.map { prefs ->
+        prefs[PENDING_MISSING_NOVEL_IDS_KEY] ?: emptySet()
+    }
+
     suspend fun setLibraryUri(uri: String) {
         context.dataStore.edit { prefs ->
             prefs[LIBRARY_URI_KEY] = uri
@@ -112,6 +124,12 @@ class PreferencesManager(private val context: Context) {
     suspend fun setReaderLineHeight(height: Float) {
         context.dataStore.edit { prefs ->
             prefs[READER_LINE_HEIGHT_KEY] = height
+        }
+    }
+
+    suspend fun setPendingMissingNovelIds(ids: Set<String>) {
+        context.dataStore.edit { prefs ->
+            prefs[PENDING_MISSING_NOVEL_IDS_KEY] = ids
         }
     }
 }
