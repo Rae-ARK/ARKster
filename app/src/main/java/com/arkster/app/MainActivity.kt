@@ -172,13 +172,21 @@ class MainActivity : ComponentActivity() {
     private val scanProgress = mutableStateOf<Pair<Int, Int>?>(null)  // (current, total) or null if not scanning
     private val scanMessage = mutableStateOf("")
     private val metadataSearchState = mutableStateOf<MetadataSearchState>(MetadataSearchState.Idle)
-    private lateinit var db: AppDatabase
-    private lateinit var scanner: ScannerImpl
-    private lateinit var prefsManager: PreferencesManager
-    private lateinit var contentRepo: TextChapterContentRepository
-    // Stateless, can't throw, needs no Context - constructed eagerly rather than
-    // alongside the other services in onCreate's try/catch.
-    private val metadataProvider = GoogleBooksMetadataProvider()
+    // STAGE 2 MOVE -- 2026-11-11: these five used to be this Activity's own
+    // `lateinit var`s, constructed fresh in onCreate() below on every single
+    // rotation. They now live on App (Application), which survives rotation,
+    // so a config change no longer tears down and rebuilds the database
+    // connection, re-walks nothing, etc. - see App.kt for the full reasoning,
+    // including why App still constructs them lazily rather than eagerly.
+    // `get()` instead of plain vals so every existing reference below keeps
+    // working unchanged - that's the only reason these are typed out instead
+    // of just writing `app.db` etc. at every call site.
+    private val app: App get() = application as App
+    private val db: AppDatabase get() = app.db
+    private val scanner: ScannerImpl get() = app.scanner
+    private val prefsManager: PreferencesManager get() = app.prefsManager
+    private val contentRepo: TextChapterContentRepository get() = app.contentRepo
+    private val metadataProvider: GoogleBooksMetadataProvider get() = app.metadataProvider
 
     private val pickFolder = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
         uri?.let { selectedUri ->
@@ -582,11 +590,21 @@ class MainActivity : ComponentActivity() {
         // whole app down before a single frame is drawn - "installs fine, crashes on open,
         // never even shows a screen". Wrapping this means a failure here shows an error
         // screen with the real exception instead of a silent, undebuggable instant crash.
+        //
+        // STAGE 2 MOVE -- 2026-11-11: db/scanner/prefsManager/contentRepo are now `by
+        // lazy` on App (see App.kt) instead of assigned here - on a config change
+        // they're already built and this block below is a no-op (first access already
+        // happened on cold launch, success or failure). Referencing each one as a bare
+        // statement is deliberate: it's what forces the lazy's first construction to
+        // happen right here, inside this try/catch, instead of wherever the first real
+        // use further down happens to be - which is the entire point, since that's what
+        // keeps a bad AppDatabase.create() landing on the crash screen below instead of
+        // surfacing as an unrelated exception mid-scan or mid-composition.
         try {
-            db = AppDatabase.create(this)
-            scanner = ScannerImpl(this)
-            prefsManager = PreferencesManager(this)
-            contentRepo = TextChapterContentRepository(this)
+            db
+            scanner
+            prefsManager
+            contentRepo
         } catch (e: Throwable) {
             renderCrashScreen(e)
             return

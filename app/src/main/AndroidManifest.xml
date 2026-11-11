@@ -5,7 +5,12 @@
          remote cover thumbnails via Coil. The app is otherwise fully offline. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- STAGE 2 MOVE -- 2026-11-11: android:name added to wire up App (Application),
+         which now owns db/scanner/prefsManager/contentRepo/metadataProvider for the
+         process's lifetime instead of MainActivity rebuilding them every rotation. See
+         App.kt and docs/arkster/implementation/oop-modular-monolith-refactor.md. -->
     <application
+        android:name=".App"
         android:allowBackup="true"
         android:label="ARKster"
         android:icon="@mipmap/ic_launcher"

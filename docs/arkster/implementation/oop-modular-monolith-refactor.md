@@ -3,14 +3,29 @@
 ## Status
 
 **Stage 0 — documentation. Done.**
-**Stage 1 — directory/package reorganization. Done (this patch).** Pure
+**Stage 1 — directory/package reorganization. Done.** Pure
 `git mv` + package renames only; see the per-file `STAGE 1 MOVE` header
 comments and the `core/README.md`, `domain/README.md`, `scanner/README.md`
 and `feature/README.md` directory notes this patch added for exactly what
 moved where and what, if anything, still touches each file in a later
-stage. `MainActivity.kt` is still 1,041 lines and not yet thin (Stage 3);
-`ScannerImpl.kt` is still one 648-line class (Stage 4). Stages 2–7 below
-are not started.
+stage. `MainActivity.kt` is still 1,041-ish lines and not yet thin (Stage
+3); `ScannerImpl.kt` is still one 648-line class (Stage 4).
+**Stage 2 — application-scoped services (Singleton). Done (this patch).**
+New `App : Application` (see `App.kt`'s `STAGE 2 MOVE` header for the full
+reasoning, including why its five properties stay `by lazy` rather than
+built eagerly in `Application.onCreate()`). `MainActivity` now reaches
+these through `get()` properties delegating to `app.db` etc. instead of
+owning `lateinit var`s — every other reference to `db`/`scanner`/
+`prefsManager`/`contentRepo`/`metadataProvider` in `MainActivity.kt` is
+unchanged. This closes the config-change half of the gap described above;
+the process-death half is still open until Stage 3's `SavedStateHandle`
+work. Stages 3–7 below are not started.
+
+This doc itself is scaffolding for the refactor, not a permanent fixture —
+expect it to be deleted once Stage 7 ships, at which point every
+`STAGE N MOVE` comment this refactor has added that links here will need
+a new home for that context (or to just inline the relevant bit) before
+the link goes stale. Noting this now so it isn't a surprise later.
 
 ## Motivation
 
@@ -202,10 +217,13 @@ was a repository, ahead of Stage 6 formalizing the rest) and
 `NovelMetadataProvider.kt` → `domain/metadata/` (a data-access concern,
 same reasoning).
 
-### Stage 2 — Application-scoped services (Singleton). Not started.
+### Stage 2 — Application-scoped services (Singleton). Done.
 New `App : Application` owns `db`/`scanner`/`prefsManager`/`contentRepo`/
-`metadataProvider` for the process's lifetime, constructed once instead of
-in `MainActivity.onCreate`. This alone stops those services churning on
+`metadataProvider` for the process's lifetime, each `by lazy` so first
+construction still happens inside `MainActivity.onCreate`'s existing
+try/catch (preserving the crash-screen behavior for a bad
+`AppDatabase.create()`) rather than in `Application.onCreate()`, which runs
+before that guard exists. This alone stops those services churning on
 every rotation, ahead of any `ViewModel` work.
 
 ### Stage 3 — Per-feature ViewModels (Observer + Memento + Mediator + State). Not started.
