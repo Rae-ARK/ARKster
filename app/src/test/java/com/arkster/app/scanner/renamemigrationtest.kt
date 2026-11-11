@@ -90,4 +90,23 @@ class RenameMigrationTest {
             matches.toSet()
         )
     }
+
+    @Test
+    fun `chapterFilenameFrom extracts the leaf filename from a SAF document URI`() {
+        val sourcePath =
+            "content://com.android.externalstorage.documents/tree/primary%3AStories/document/primary%3AStories%2FNovel%2FChapter%201.txt"
+        assertEquals("Chapter 1.txt", chapterFilenameFrom(sourcePath))
+    }
+
+    @Test
+    fun `chapterFilenameFrom round-trips a filename containing a literal plus sign`() {
+        val sourcePath =
+            "content://com.android.externalstorage.documents/tree/primary%3AStories/document/primary%3AStories%2FNovel%2FChapter%2B1.txt"
+        assertEquals("Chapter+1.txt", chapterFilenameFrom(sourcePath))
+    }
+
+    @Test
+    fun `chapterFilenameFrom falls back to the last path segment with no document marker`() {
+        assertEquals("chapter1.txt", chapterFilenameFrom("plain/path/chapter1.txt"))
+    }
 }

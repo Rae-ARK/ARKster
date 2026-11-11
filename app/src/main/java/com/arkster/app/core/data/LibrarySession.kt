@@ -45,14 +45,19 @@ package com.arkster.app.core.data
  */
 
 import android.net.Uri
+import com.arkster.app.core.database.ChapterOverrideEntity
 import com.arkster.app.core.database.NovelEntity
 import com.arkster.app.core.datastore.PreferencesManager
 import com.arkster.app.domain.booksource.UnsupportedSource
 import com.arkster.app.domain.repository.AuthorRepository
+import com.arkster.app.domain.repository.ChapterRepository
 import com.arkster.app.domain.repository.NovelRepository
 import com.arkster.app.domain.repository.ReadingProgressRepository
+import com.arkster.app.scanner.RenameMatch
 import com.arkster.app.scanner.ScannerImpl
+import com.arkster.app.scanner.chapterFilenameFrom
 import com.arkster.app.scanner.decideStaleNovels
+import com.arkster.app.scanner.detectRenameMatches
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow

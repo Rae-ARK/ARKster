@@ -1,5 +1,7 @@
 package com.arkster.app.scanner
 
+import java.net.URLDecoder
+
 // See docs/arkster/proposal/bugs.md "Folder rename orphans a novel's data": novel/arc/
 // chapter ids are hashed from the SAF folder URI, so renaming a novel's folder makes it
 // look like a brand-new novel to the next scan, and the two-pass reconciliation in
@@ -55,4 +57,29 @@ fun detectRenameMatches(
             null
         }
     }
+}
+
+// A ChapterEntity.sourcePath is the chapter file's full SAF document URI (see
+// ScannerImpl.parseChaptersInFolder) - something like
+// "content://.../document/primary%3AStories%2FNovel%2FChapter%201.txt", where the part
+// after "/document/" is itself a percent-encoded "<root>:<relative/path>" document id.
+// The filename signature detectRenameMatches compares above needs just the leaf
+// filename - not the folder path, which a rename by definition changes, and not the
+// root/volume prefix, which has nothing to do with the file. Pure string handling only
+// (no android.net.Uri, which isn't available in a plain JVM unit test - see
+// app/build.gradle.kts) so this stays unit-testable the same way as the rest of this
+// file; see RenameMigrationTest.
+//
+// java.net.URLDecoder is form (application/x-www-form-urlencoded) decoding, not URI
+// percent-decoding - its one difference that matters here is that it also turns a
+// literal '+' into a space, which a real percent-encoded URI never does (a literal '+'
+// in a filename is encoded as "%2B"). Escaping any literal '+' to "%2B" first before
+// decoding neutralizes that difference, so a filename that genuinely contains '+'
+// round-trips correctly.
+fun chapterFilenameFrom(sourcePath: String): String {
+    val documentId = sourcePath.substringAfterLast("/document/")
+    val decoded = runCatching {
+        URLDecoder.decode(documentId.replace("+", "%2B"), "UTF-8")
+    }.getOrDefault(documentId)
+    return decoded.substringAfterLast("/")
 }

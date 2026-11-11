@@ -65,6 +65,13 @@ class ChapterRepository(
 
     suspend fun deleteOverride(chapterId: String) = chapterOverrideDao.delete(chapterId)
 
+    // Exposes the same join getEffectiveChapters() already does internally, for callers
+    // that need the raw override rows themselves rather than chapters with overrides
+    // already applied - see LibrarySession's rename-migration path (bugs.md "Folder
+    // rename orphans a novel's data"), which re-points a matched old novel's overrides
+    // at its new chapter ids one row at a time instead of merging them into a display list.
+    suspend fun overridesForNovel(novelId: String): List<ChapterOverrideEntity> = chapterOverrideDao.forNovel(novelId)
+
     // Moved verbatim from EffectiveChapters.kt's loadEffectiveChapters(). See that
     // (now-deleted) file's header for why this merge - raw scanned chapters with
     // title/position overrides layered on top - lives in exactly one place rather
