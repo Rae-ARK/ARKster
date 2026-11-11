@@ -48,31 +48,57 @@ chapters.
 
 ## Navigation
 
-```kotlin
-sealed class Screen {
-    object Home : Screen()
-    object FictionBrowse : Screen()
-    object Library : Screen()          // legacy direct folder scan entry
-    data class NovelDetail(val novel: NovelEntity) : Screen()
-    data class Reader(val novelId: String, val chapter: ChapterEntity, val content: String) : Screen()
-    data class ChapterEditor(val novel: NovelEntity) : Screen()
-    object Settings : Screen()
-    data class Author(val authorId: String, val from: Screen) : Screen()
-}
-```
+As of the Stage 3 refactor (2026-11-11), navigation is Navigation-Compose
+with plain string route templates, not the `Screen` sealed class shown in
+earlier drafts of this doc — that class was deleted and its cases replaced
+one-for-one in [`Routes.kt`](../../../app/src/main/java/com/arkster/app/core/navigation/Routes.kt):
 
-Home is the initial screen; Library still exists as a direct
-folder-scanning entry point. `Screen.Author` carries the screen it was
-entered from so back returns to the fiction page or the chapter page,
-whichever sent the user there, rather than always bouncing to Home.
+| Route object            | Path template                          |
+|--------------------------|-----------------------------------------|
+| `HomeRoute`              | `home` (start destination)              |
+| `FictionBrowseRoute`     | `browse`                                |
+| `NovelDetailRoute`       | `novelDetail/{novelId}`                 |
+| `ReaderRoute`            | `reader/{novelId}/{chapterId}`          |
+| `ChapterLoadErrorRoute`  | `chapterLoadError/{novelId}/{chapterId}`|
+| `ChapterEditorRoute`     | `chapterEditor/{novelId}`               |
+| `AuthorRoute`            | `author/{authorId}`                     |
+| `SettingsRoute`          | `settings`                              |
+| `ThemeSettingsRoute`     | `themeSettings`                         |
+| `AboutRoute`             | `about`                                 |
+| `PrivacyPolicyRoute`     | `privacyPolicy`                         |
+| `TermsAndConditionsRoute`| `termsAndConditions`                    |
+
+Home is the start destination. There is no `Library` route — the old
+"legacy direct folder scan entry point" case was dropped with the rest of
+`Screen` in Stage 3 and should not have still been listed here; folder
+scanning is reached through Settings. The old `Screen.Author.from` field
+(which screen to return to) is gone too: `NavController` keeps a real back
+stack, so `popBackStack()` already returns to whichever entry — fiction
+page or chapter page — actually preceded Author.
+
+One exception to "every screen is a route": the splash screen
+(`feature/splash/SplashScreen.kt`) is not in the table above and has no
+route. `MainActivity` shows it in front of the `NavHost` entirely, gated by
+a local boolean, and swaps to the real nav graph once it finishes. That's
+deliberate — you don't want back navigation able to return to a splash —
+but it does mean splash can't be deep-linked to and never appears on the
+back stack, unlike every other screen in the app.
 
 ## Visual language
 
-Material 3 color scheme throughout, with a custom orange
-(`#FF9800`) reserved for in-progress status badges. Rounded corners
+Material 3 color scheme is the intent, though it's not consistently
+sourced yet: the reader's sepia/dark/light palette
+(`feature/reader/ReaderScreen.kt`) and the theme picker's seed colors
+(`feature/settings/ThemeSettingsScreen.kt`) are each hand-rolled with
+their own hardcoded hex literals rather than both reading from one
+`MaterialTheme` color scheme — tracked as a follow-up, not yet fixed.
+A custom orange (`#FF9800`) is reserved for in-progress status badges. Rounded corners
 (8–12dp), subtle elevation, gradient accents on featured content.
 Headline-small for section titles, title-large for novel titles in
 cards, label-small for metadata, body-small for descriptions; serif in
 the reader specifically. Minimum 48dp touch targets throughout.
 
-**Verified:** 2026-11-10 @ (this patch)
+**Verified:** 2026-11-11 @ (this patch) — the 2026-11-10 verification predated
+the Stage 3 navigation refactor by less than a day; the Navigation section
+above was rewritten against the current `Routes.kt`/`AppNavHost.kt` rather
+than the deleted `Screen` sealed class.

@@ -57,7 +57,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -282,7 +282,13 @@ class MainActivity : ComponentActivity() {
 
             MaterialTheme(colorScheme = colorScheme) {
                 val view = LocalView.current
-                var showSplash by remember { mutableStateOf(true) }
+                // rememberSaveable (not remember): this value must survive Activity
+                // recreation on configuration changes (MainActivity declares no
+                // android:configChanges, so e.g. rotation destroys and recreates it).
+                // With plain `remember` the flag reset to true on every recreation,
+                // replaying the splash animation on every rotation instead of once
+                // per process start.
+                var showSplash by rememberSaveable { mutableStateOf(true) }
 
                 if (showSplash) {
                     // Splash always renders on its own solid-black canvas (see
