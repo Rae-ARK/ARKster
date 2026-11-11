@@ -34,11 +34,10 @@ package com.arkster.app.core.navigation
  * would no longer compile, not just a style preference.
  */
 
-import android.os.Bundle
 import androidx.lifecycle.AbstractSavedStateViewModelFactory
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
-import androidx.savedstate.SavedStateRegistryOwner
+import androidx.navigation.NavBackStackEntry
 import com.arkster.app.App
 import com.arkster.app.feature.author.AuthorViewModel
 import com.arkster.app.feature.browse.FictionBrowseViewModel
@@ -47,11 +46,21 @@ import com.arkster.app.feature.noveldetail.NovelDetailViewModel
 import com.arkster.app.feature.reader.ReaderViewModel
 import com.arkster.app.feature.settings.SettingsViewModel
 
+// BUGFIX -- 2026-11-11
+// backStackEntry.arguments (the resolved {novelId}/{chapterId}/{authorId}
+// route placeholders) is a Bundle entirely separate from the
+// SavedStateRegistry that AbstractSavedStateViewModelFactory otherwise reads.
+// Previously this class took a bare SavedStateRegistryOwner and let
+// defaultArgs default to null, so the SavedStateHandle built for every
+// arg-taking destination (NovelDetail, ChapterEditor, Reader, Author) was
+// seeded with nothing on first navigation - checkNotNull(savedStateHandle[...])
+// in each of those ViewModels' init then threw immediately. Taking the
+// NavBackStackEntry directly and forwarding its arguments as defaultArgs
+// seeds the handle correctly.
 class AppViewModelFactory(
     private val app: App,
-    owner: SavedStateRegistryOwner,
-    defaultArgs: Bundle? = null
-) : AbstractSavedStateViewModelFactory(owner, defaultArgs) {
+    backStackEntry: NavBackStackEntry
+) : AbstractSavedStateViewModelFactory(backStackEntry, backStackEntry.arguments) {
 
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(
