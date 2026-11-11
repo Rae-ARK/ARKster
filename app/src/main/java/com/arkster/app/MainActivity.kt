@@ -1,4 +1,4 @@
-package com.arkster.app
+package horizonarkstudio.raeark.arkster
 
 /*
  * STAGE 3 MOVE -- 2026-11-11
