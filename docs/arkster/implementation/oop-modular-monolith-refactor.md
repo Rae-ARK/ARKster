@@ -2,8 +2,15 @@
 
 ## Status
 
-**Stage 0 — documentation. Done.** Stages 1–7 below are not started. No
-app code has been touched yet.
+**Stage 0 — documentation. Done.**
+**Stage 1 — directory/package reorganization. Done (this patch).** Pure
+`git mv` + package renames only; see the per-file `STAGE 1 MOVE` header
+comments and the `core/README.md`, `domain/README.md`, `scanner/README.md`
+and `feature/README.md` directory notes this patch added for exactly what
+moved where and what, if anything, still touches each file in a later
+stage. `MainActivity.kt` is still 1,041 lines and not yet thin (Stage 3);
+`ScannerImpl.kt` is still one 648-line class (Stage 4). Stages 2–7 below
+are not started.
 
 ## Motivation
 
@@ -183,11 +190,17 @@ internal reorganization of *this* repo's directory structure is not.
 This file, plus the `architecture.md` correction noted below. No app code
 touched.
 
-### Stage 1 — Directory/package reorganization. Not started.
-Move files into the target layout above. Pure `git mv` plus package-name
+### Stage 1 — Directory/package reorganization. Done.
+Moved files into the target layout above. Pure `git mv` plus package-name
 updates — no logic changes, no behavior changes. `MainActivity.kt` is not
 yet thin at the end of this stage (that's Stage 3); this stage only
-establishes where things live.
+establishes where things live. Two placements weren't explicit in the
+target tree above and were decided during the move, each flagged with a
+file-header comment so a later stage doesn't have to rediscover the
+reasoning: `ChapterContentRepository.kt` → `domain/repository/` (it already
+was a repository, ahead of Stage 6 formalizing the rest) and
+`NovelMetadataProvider.kt` → `domain/metadata/` (a data-access concern,
+same reasoning).
 
 ### Stage 2 — Application-scoped services (Singleton). Not started.
 New `App : Application` owns `db`/`scanner`/`prefsManager`/`contentRepo`/
