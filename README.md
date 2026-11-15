@@ -101,8 +101,13 @@ lifecycle — start at
 - **Graceful degradation**: Auto-generated covers, best-effort title parsing, user override editor.
 
 ## License
-<a href="https://www.gnu.org/licenses/gpl-3.0"><img src="https://www.gnu.org/graphics/gplv3-127x51.png" alt="GNU GPLv3 Image"></a>
 
-ARKster is licensed under the
-[GNU General Public License v3.0](https://github.com/ARKlight-Ecosystem/ARKlight/blob/main/LICENSE)
-or later. 
+[![GNU GPLv3 Image](https://www.gnu.org/graphics/gplv3-127x51.png)](http://www.gnu.org/licenses/gpl-3.0.en.html)
+
+ARKster is Free Software: You can use, study share and improve it at your
+will. Specifically you can redistribute and/or modify it under the terms of the
+[GNU General Public License](https://www.gnu.org/licenses/gpl.html) as
+published by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+More information can be found [here](https://github.com/Rae-ARK/ARKster/blob/main/LICENSE).
