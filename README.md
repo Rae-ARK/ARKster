@@ -1,6 +1,27 @@
-# ARKster — Novel Library & Reader (Android-first)
+<p align="center">
+  <img src="assets/app-icon-source.png" width="150" alt="ARKster icon">
+</p>
 
-ARKster is a privacy-first, offline-first local library and reader designed to make a messy folder of novels feel like a private Royal Road site on your phone.
+<h1 align="center"><b>ARKster</b></h1>
+
+<h4 align="center">A privacy-first, offline-first local library and reader designed to make a messy folder of novels feel like a private Royal Road site on your phone.</h4>
+
+<p align="center">
+  <a href="https://github.com/Rae-ARK/ARKster/releases/tag/v0.2"><img alt="Latest Version" src="https://img.shields.io/static/v1?label=tag&message=v0.85&color=64B5F6&style=flat"></a>
+  <a href="https://github.com/Rae-ARK/ARKster/releases/"><img alt="Releases" src="https://img.shields.io/github/downloads/Rae-ARK/ARKarium/total.svg?color=4B95DE&style=flat"></a>
+  <img alt="Minimum SDK Version" src="https://img.shields.io/badge/Min%20SDK-34%2B-1450A8?style=flat">
+</p>
+
+<h4 align="center">
+  <a href="docs/arkster/foundational/what-is-arkster.md">What is ARKster?</a> |
+  <a href="/docs/arkster">Documentation</a> |
+  <a href="/docs/arkster/foundational">For Settled Decisions</a>
+</h4>
+
+<p align="center">
+  <a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium%3A%2F%2Fapp%2F%257B%2522id%2522%253A%2522ARKster%2522%252C%2522url%2522%253A%2522https%253A%252F%252Fgithub.com%252FRae-ARK%252FARKster%2522%252C%2522author%2522%253A%2522Rae-ARK%2522%252C%2522name%2522%253A%2522ARKster%2522%257D"><img src="assets/badge_obtainium.png" alt="Get it on Obtainium" height="80"></a>
+  <a href="https://github.com/Rae-ARK/ARKster/releases/"><img src="https://raw.githubusercontent.com/machiav3lli/oandbackupx/034b226cea5c1b30eb4f6a6f313e4dadcbb0ece4/badge_github.png" alt="Get it on GitHub" height="80"></a>
+</p>
 
 Key points:
 - Android-first native app (Kotlin + Jetpack Compose).
@@ -80,4 +101,8 @@ lifecycle — start at
 - **Graceful degradation**: Auto-generated covers, best-effort title parsing, user override editor.
 
 ## License
-GPLv3
+<a href="https://www.gnu.org/licenses/gpl-3.0"><img src="https://www.gnu.org/graphics/gplv3-127x51.png" alt="GNU GPLv3 Image"></a>
+
+ARKster is licensed under the
+[GNU General Public License v3.0](https://github.com/ARKlight-Ecosystem/ARKlight/blob/main/LICENSE)
+or later. 
